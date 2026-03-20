@@ -98,34 +98,15 @@ function isAvoidanceReasonText(reasonText) {
   return AVOIDANCE_KEYWORDS.some((kw) => t.includes(String(kw).toLowerCase()))
 }
 
-function buildInGameTimestamp(scene) {
-  const totalGameMinutes = Number(scene?.gameTimeMinutes ?? 0)
-  if (!Number.isFinite(totalGameMinutes) || totalGameMinutes < 0) {
-    return {
-      gameMinutesTotal: 0,
-      day: 1,
-      hour24: 0,
-      minute: 0,
-      clock24: '00:00',
-      label: 'Day 1 00:00'
-    }
-  }
-
-  const totalWholeMinutes = Math.floor(totalGameMinutes)
-  const minutesPerDay = 24 * 60
-  const day = Math.floor(totalWholeMinutes / minutesPerDay) + 1
-  const minuteOfDay = totalWholeMinutes % minutesPerDay
-  const hour24 = Math.floor(minuteOfDay / 60)
-  const minute = minuteOfDay % 60
-  const hh = String(hour24).padStart(2, '0')
-  const mm = String(minute).padStart(2, '0')
+function buildRealWorldTimestamp(sessionStartedAtMs) {
+  const nowMs = Date.now()
+  const elapsedMs = Math.max(0, nowMs - sessionStartedAtMs)
   return {
-    gameMinutesTotal: totalGameMinutes,
-    day,
-    hour24,
-    minute,
-    clock24: `${hh}:${mm}`,
-    label: `Day ${day} ${hh}:${mm}`
+    nowMs,
+    nowIso: new Date(nowMs).toISOString(),
+    elapsedMs,
+    elapsedSeconds: elapsedMs / 1000,
+    elapsedMinutes: elapsedMs / 60000
   }
 }
 
@@ -194,6 +175,7 @@ export function getCharacterEngine() {
     // Snapshot at action start.
     _activeActionNeedsSnapshot: null,
     habituationCounters: {},
+    _realSessionStartedAtMs: Date.now(),
 
     // Latest reasoning text for UI.
     _reasoningText: 'Waiting for next decision…',
@@ -649,12 +631,12 @@ export function getCharacterEngine() {
 
       if (DEBUG_AWARENESS_CHANGES) {
         const awarenessFinal = this.awareness
-        const inGameTimestamp = buildInGameTimestamp(this.scene)
+        const realWorldTimestamp = buildRealWorldTimestamp(this._realSessionStartedAtMs)
         const awarenessLogPayload = {
           type: 'action_complete',
           actionId,
           level: levelAtAction,
-          inGameTimestamp,
+          realWorldTimestamp,
           needsAtActionStart: needsBefore ? { ...needsBefore } : null,
           awarenessBefore,
           awarenessAfterApply: awarenessAfter,
@@ -670,7 +652,6 @@ export function getCharacterEngine() {
             sleepRecovery: sleepHabituationRecovery
           }
         }
-        console.log('[awareness]', awarenessLogPayload)
         if (DEBUG_AWARENESS_CHANGES_JSON) {
           console.log('[awareness-json]', JSON.stringify(awarenessLogPayload))
         }

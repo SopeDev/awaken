@@ -6,15 +6,15 @@
 export const TRAIT_IDS = [
   'courage',
   'discipline',
-  'impulsiveness',
+  'expressiveness',
   'logic',
   'intuition',
   'curiosity',
   'empathy',
-  'anxiety',
   'desire',
-  'stability',
-  'comfort_seeking',
+  'introspection',
+  'resilience',
+  'imagination',
   'perception'
 ]
 
@@ -22,18 +22,21 @@ export const TRAIT_IDS = [
 export const BALANCED_TRAIT_SHEET = Object.fromEntries(TRAIT_IDS.map((id) => [id, 50]))
 
 export const TRAIT_META = {
-  courage:       { element: 'fire', description: 'Willingness to act despite discomfort or risk' },
-  discipline:    { element: 'fire', description: 'Ability to sustain action over time' },
-  impulsiveness: { element: 'fire', description: 'Tendency to act immediately without reflection' },
-  logic:         { element: 'air',  description: 'Analytical thinking, structure, reasoning' },
-  intuition:     { element: 'air',  description: 'Sensitivity to subtle signals' },
-  curiosity:     { element: 'air',  description: 'Drive to explore, question, and learn' },
-  empathy:       { element: 'water', description: 'Emotional connection to others' },
-  anxiety:       { element: 'water', description: 'Baseline unease / anticipation of negative outcomes' },
-  desire:        { element: 'water', description: 'Pull toward pleasure, reward, attachment' },
-  stability:     { element: 'earth', description: 'Ability to remain grounded under change' },
-  comfort_seeking: { element: 'earth', description: 'Tendency to avoid discomfort and stay safe' },
-  perception:   { element: 'earth', description: 'Environmental and self-awareness, pattern recognition' }
+  courage: { element: 'fire', description: 'Acts toward discomfort — approaches difficulty and breaks inertia' },
+  discipline: { element: 'fire', description: 'Follows through consistently — sustained action under pressure' },
+  expressiveness: { element: 'fire', description: 'Initiates outwardly — communicates, acts, seeks presence' },
+
+  logic: { element: 'air', description: 'Reasons analytically — seeks coherence and visible patterns' },
+  intuition: { element: 'air', description: 'Detects hidden patterns — primary channel for player signals' },
+  curiosity: { element: 'air', description: 'Seeks the new — exploration and growth actions' },
+
+  empathy: { element: 'water', description: 'Responds to others emotional states — relational resonance' },
+  desire: { element: 'water', description: 'Pursues pleasure intensely — strongly motivated by reward' },
+  introspection: { element: 'water', description: 'Notices own patterns — catches the loop and names it' },
+
+  resilience: { element: 'earth', description: 'Stays with discomfort without escaping — endures pressure' },
+  imagination: { element: 'earth', description: 'Conceives alternatives — insight triggers possibilities' },
+  perception: { element: 'earth', description: 'Notices environmental details — reads what is actually there' }
 }
 
 export const PLANETS = [

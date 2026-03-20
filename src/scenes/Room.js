@@ -15,29 +15,18 @@ import {
 } from '../data/roomData.js'
 import {
   ACTIONS,
-  AVAILABLE_ACTION_IDS,
   INTERACTION_DURATION,
-  getActionLabel
 } from '../data/actions.js'
 import {
-  borderBlocksMove,
   findPath,
+  getBorderWallTiles,
   getWalkableTilesAdjacentToObject,
   isWalkable,
   pixelToTile,
   tileToPixel
 } from '../data/roomGrid.js'
-import { createNeedsState, NEED_KEYS, ACTION_EFFECTS } from '../systems/needs/index.js'
 import { EventBus } from '../eventBus.js'
-import { BALANCED_TRAIT_SHEET } from '../systems/cosmicBlueprint/index.js'
-import { NEED_LABELS } from '../systems/needs/ui.js'
-import {
-  createEntropyState,
-  updateEntropyFromNeeds,
-  applyEntropyDelta,
-  getSignalStrengthMultiplier,
-  updateEntrapmentState
-} from '../systems/entropy/index.js'
+import { getCharacterEngine } from '../systems/character/characterEngine.js'
 
 const FLOOR_COLOR = 0x3d3d3d
 const NEEDS_PANEL_HEIGHT = 140
@@ -46,11 +35,8 @@ const ENTROPY_STRIP_HEIGHT = 28
 // Calibration: 30 real minutes ~= 1 in-game day → 1 game minute = 1 real minute.
 // So 1 real second = 1/60 game minutes (needs tick slowly).
 const GAME_MINUTES_PER_REAL_SECOND = 1 / 60
-// Testing: set to 30 to run needs, entropy, and actions 30x faster.
-const TEST_SPEED_MULTIPLIER = 30
-const REASONING_PANEL_PADDING = 10
-const REASONING_TITLE = 'Avatar\'s reasoning'
-
+// Base multiplier is 1. Game speed is controlled at runtime via `this.time.timeScale`.
+const TEST_SPEED_MULTIPLIER = 1
 const WALL_COLOR = 0x2a2a2a
 const OBJECT_COLOR = 0x555555
 const OBJECT_STROKE = 0x888888
@@ -62,10 +48,6 @@ const ACTION_PROGRESS_BAR_WIDTH = 46
 const ACTION_PROGRESS_BAR_HEIGHT = 6
 const ACTION_PROGRESS_BAR_OFFSET_Y = -18
 
-// How long (ms) to spread action need deltas over when not during an action (fallback).
-const NEED_CHANGE_DURATION_MS = 2500
-const NEED_ARROW_PADDING = 14
-
 export class Room extends Phaser.Scene {
   constructor() {
     super('Room')
@@ -73,6 +55,9 @@ export class Room extends Phaser.Scene {
 
   create() {
     this.isExecutingAction = false
+    this.isPaused = false
+    this.speedMultiplier = 1
+    this.time.timeScale = this.speedMultiplier
     this.initVariables()
     this.objectsById = Object.fromEntries(ROOM_OBJECTS.map(o => [o.id, o]))
     this.initInput()
@@ -81,43 +66,30 @@ export class Room extends Phaser.Scene {
     this.drawBorders()
     this.drawObjects()
     this.initPlayer()
-    this.initNeedsSystem()
-    this.initEntropySystem()
-    this._reasoningText = 'Waiting for next decision…'
-    this._lastUiEmit = 0
-    this._runLog = []
-    this._runStartedAt = new Date().toISOString()
-    this._runLog.push({
-      type: 'run_start',
-      timestamp: Date.now(),
-      startedAt: this._runStartedAt,
-      needs: { ...this.needsState.getNeeds() },
-      entropy: this.entropyState.entropy,
-      gameTimeMinutes: this.gameTimeMinutes
-    })
-    this.startAIActionLoop()
-    EventBus.emit('current-scene-ready', this)
-    this.emitRoomUIState()
-  }
 
-  /** Write run log to a JSON file and trigger download (browser cannot write to disk directly). */
-  downloadRunLog() {
-    if (!this._runLog || this._runLog.length === 0) return
-    const payload = {
-      runStartedAt: this._runStartedAt,
-      runEndedAt: new Date().toISOString(),
-      finalEntropy: this.entropyState?.entropy ?? 100,
-      finalGameTimeMinutes: this.gameTimeMinutes,
-      decisionCount: this._runLog.filter((e) => e.type === 'decision').length,
-      entries: this._runLog
+    this.characterEngine = getCharacterEngine()
+    this.characterEngine.attachScene(this)
+
+    this._pauseHandler = (paused) => {
+      this.isPaused = !!paused
+      this.time.timeScale = this.isPaused ? 0 : this.speedMultiplier
     }
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `awaken-run-${this._runStartedAt.replace(/[:.]/g, '-')}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    EventBus.on('toggle-pause', this._pauseHandler)
+
+    this._speedHandler = (nextSpeed) => {
+      const x = Number(nextSpeed)
+      if (!Number.isFinite(x) || x <= 0) return
+      this.speedMultiplier = x
+      if (!this.isPaused) this.time.timeScale = this.speedMultiplier
+    }
+    EventBus.on('set-speed', this._speedHandler)
+    this.events.on('shutdown', () => {
+      if (this._pauseHandler) EventBus.off('toggle-pause', this._pauseHandler)
+      if (this._speedHandler) EventBus.off('set-speed', this._speedHandler)
+    })
+
+    EventBus.emit('current-scene-ready', this)
+    this.characterEngine.emitUiStateThrottled()
   }
 
   initVariables() {
@@ -166,8 +138,6 @@ export class Room extends Phaser.Scene {
   getTileAt(worldX, worldY) {
     const next = pixelToTile(worldX - this.mapX, worldY - this.mapY)
     if (!isWalkable(next.tx, next.ty)) return 0
-    const cur = pixelToTile(this.player.x - this.mapX, this.player.y - this.mapY)
-    if (borderBlocksMove(cur.tx, cur.ty, next.tx, next.ty)) return 0
     return -1
   }
 
@@ -179,44 +149,36 @@ export class Room extends Phaser.Scene {
     this.add.rectangle(this.mapX, this.mapY, width, height).setOrigin(0, 0).setStrokeStyle(4, WALL_COLOR).setFillStyle(0x000000, 0)
   }
 
-  /** Draw section borders with a one-tile gap (the opening). */
+  /** Draw border "fence" tiles as blocked wall cells (single gap remains walkable). */
   drawBorders() {
     const g = this.add.graphics().setDepth(5)
-    g.lineStyle(BORDER_WIDTH, BORDER_COLOR, 1)
     const ts = TILE_SIZE
-    const line = (x1, y1, x2, y2) => g.lineBetween(this.mapX + x1, this.mapY + y1, this.mapX + x2, this.mapY + y2)
-    for (const b of ROOM_BORDERS) {
-      if (b.type !== 'rect') continue
-      const x0 = b.gridX * ts
-      const y0 = b.gridY * ts
-      const x1 = (b.gridX + b.gridW) * ts
-      const y1 = (b.gridY + b.gridH) * ts
-      const gx = b.gapGridX * ts
-      const gy = b.gapGridY * ts
-      if (b.gapGridY === b.gridY) {
-        line(x0, y0, gx, y0)
-        line(gx + ts, y0, x1, y0)
-      } else {
-        line(x0, y0, x1, y0)
+
+    // Visual wall styling (kept distinct so players can read the partitions).
+    const wallFill = 0x8b1d1d
+    const wallStroke = 0xc05050
+
+    const isInsideAnyObject = (tx, ty) => {
+      for (const obj of ROOM_OBJECTS) {
+        if (
+          tx >= obj.gridX &&
+          tx < obj.gridX + obj.gridW &&
+          ty >= obj.gridY &&
+          ty < obj.gridY + obj.gridH
+        ) return true
       }
-      if (b.gapGridY === b.gridY + b.gridH - 1) {
-        line(x0, y1, gx, y1)
-        line(gx + ts, y1, x1, y1)
-      } else {
-        line(x0, y1, x1, y1)
-      }
-      if (b.gapGridX === b.gridX) {
-        line(x0, y0, x0, gy)
-        line(x0, gy + ts, x0, y1)
-      } else {
-        line(x0, y0, x0, y1)
-      }
-      if (b.gapGridX === b.gridX + b.gridW - 1) {
-        line(x1, y0, x1, gy)
-        line(x1, gy + ts, x1, y1)
-      } else {
-        line(x1, y0, x1, y1)
-      }
+      return false
+    }
+
+    g.fillStyle(wallFill, 0.55)
+    g.lineStyle(2, wallStroke, 0.95)
+
+    for (const { tx, ty } of getBorderWallTiles()) {
+      if (isInsideAnyObject(tx, ty)) continue
+      const x = this.mapX + tx * ts
+      const y = this.mapY + ty * ts
+      g.fillRect(x, y, ts, ts)
+      g.strokeRect(x, y, ts, ts)
     }
   }
 
@@ -246,138 +208,20 @@ export class Room extends Phaser.Scene {
     this.player.setInputController({ isLocked: () => true })
   }
 
-  initNeedsSystem() {
-    this.needsState = createNeedsState()
-    this.defaultTraits = { ...BALANCED_TRAIT_SHEET }
-    // Pending need deltas from actions; applied gradually (key -> remaining delta).
-    this.pendingNeedDeltas = {}
-  }
-
-  initEntropySystem() {
-    this.entropyState = createEntropyState()
-    // Exposed for UI / future decision logic.
-    this.entropy = this.entropyState.entropy
-    this.isEntrapped = this.entropyState.isEntrapped
-    // Placeholder for future AI/LLM influence damping.
-    this.signalStrengthMultiplier = getSignalStrengthMultiplier(this.entropyState.entropy)
-  }
-
-  setReasoning(actionId, needs, traits) {
-    const { feelingPhrase, actionPhrase, details } = this.buildReasoningText(actionId, needs, traits)
-    const main = `I feel ${feelingPhrase}. I am going to ${actionPhrase}.`
-    const detailStr = details.length ? '\n\n' + details.join('\n') : ''
-    this._reasoningText = main + detailStr
-  }
-
-  buildReasoningText(actionId, needs, traits) {
-    const actionPhrase = getActionLabel(actionId)
-    const high = []
-    NEED_KEYS.forEach(key => {
-      const v = needs[key] != null ? needs[key] : 50
-      if (v >= 65) high.push({ key, v, label: NEED_LABELS[key] || key })
-    })
-
-    const feelingParts = []
-    if (high.length >= 2) {
-      feelingParts.push(high.slice(0, 2).map(({ label, v }) => `${label.toLowerCase()} (${Math.round(v)}%)`).join(' and '))
-    } else if (high.length === 1) {
-      const { label, v } = high[0]
-      feelingParts.push(`${label.toLowerCase()} (${Math.round(v)}%)`)
-    } else {
-      feelingParts.push('like doing something')
-    }
-
-    const feelingPhrase = feelingParts.join(', ')
-
-    const details = []
-    high.forEach(({ label, v }) => {
-      details.push(`• ${label}: ${Math.round(v)}%`)
-    })
-
-    const t = (k) => (traits && traits[k] != null ? traits[k] : 50)
-    const traitNotes = []
-    if (actionId === 'look_out_window' && t('curiosity') >= 55) traitNotes.push(`Curiosity (${t('curiosity')}) drew me to the window.`)
-    if (actionId === 'read_book' && t('curiosity') >= 55) traitNotes.push(`Curiosity (${t('curiosity')}) made reading appealing.`)
-    if ((actionId === 'check_phone' || actionId === 'watch_tv') && t('impulsiveness') >= 45) traitNotes.push(`Impulsiveness (${t('impulsiveness')}) made me reach for stimulation.`)
-    if (actionId === 'meditate' && t('anxiety') >= 50) traitNotes.push(`Anxiety (${t('anxiety')}) made me seek calm.`)
-    if (actionId === 'use_treadmill' && t('discipline') >= 45) traitNotes.push(`Discipline (${t('discipline')}) pushed me to move.`)
-    if (actionId === 'sit_on_couch' && t('comfort_seeking') >= 45) traitNotes.push(`Comfort-seeking (${t('comfort_seeking')}) led me to the couch.`)
-    if ((actionId === 'go_back_to_sleep' || actionId === 'sit_on_bed') && t('comfort_seeking') >= 45) traitNotes.push(`Comfort-seeking (${t('comfort_seeking')}) drew me to rest.`)
-    if ((actionId === 'take_shower' || actionId === 'look_out_window') && (needs.stress || 0) >= 50) traitNotes.push(`Stress (${Math.round(needs.stress)}%) made me seek relief.`)
-    if (actionId === 'eat_snack' && (needs.hunger || 0) >= 50) traitNotes.push(`Hunger (${Math.round(needs.hunger)}%) drove this choice.`)
-    if (actionId === 'drink_water' && (needs.thirst || 0) >= 35) traitNotes.push(`Thirst (${Math.round(needs.thirst)}%) drove this choice.`)
-    if ((actionId === 'take_shower' || actionId === 'use_sink') && (needs.hygiene_need || 0) >= 50) traitNotes.push(`Hygiene (${Math.round(needs.hygiene_need)}%) drove this choice.`)
-    if (traitNotes.length) details.push(...traitNotes)
-
-    return { feelingPhrase, actionPhrase, details }
-  }
-
-  /** Emit UI state to React (throttled). */
-  emitRoomUIState() {
-    const now = this.time.now
-    if (now - this._lastUiEmit < 100) return
-    this._lastUiEmit = now
-    const needs = this.needsState.getNeeds()
-    EventBus.emit('room-ui-state', {
-      needs: { ...needs },
-      pendingNeedDeltas: { ...this.pendingNeedDeltas },
-      entropy: this.entropyState ? this.entropyState.entropy : 0,
-      traits: this.defaultTraits ? { ...this.defaultTraits } : {},
-      reasoningText: this._reasoningText || 'Waiting for next decision…'
-    })
-  }
-
-  /** Apply a portion of pending need deltas over the action duration (or fallback). */
-  applyPendingNeedDeltas(deltaMs) {
-    const needs = this.needsState.getNeeds()
-    const pending = this.pendingNeedDeltas
-    const durationMs = this.pendingNeedChangeTotalMs || NEED_CHANGE_DURATION_MS
-    for (const key of Object.keys(pending)) {
-      const remaining = pending[key]
-      if (remaining === 0 || !NEED_KEYS.includes(key)) continue
-      const toApply = (remaining / durationMs) * deltaMs
-      const current = needs[key]
-      const target = current + toApply
-      const clamped = Math.max(0, Math.min(100, target))
-      const actual = clamped - current
-      needs[key] = clamped
-      pending[key] = remaining - actual
-      if (Math.abs(pending[key]) < 0.5) delete pending[key]
-    }
-  }
-
   update(time, delta) {
-    const gameMinutesDelta = (delta / 1000) * GAME_MINUTES_PER_REAL_SECOND * TEST_SPEED_MULTIPLIER
+    if (this.isPaused) return
+    const dtMs = delta * (this.time?.timeScale || 1)
+    const gameMinutesDelta = (dtMs / 1000) * GAME_MINUTES_PER_REAL_SECOND * TEST_SPEED_MULTIPLIER
     this.gameTimeMinutes += gameMinutesDelta
-    this.needsState.tick(gameMinutesDelta, this.defaultTraits, null)
 
-    // Passive entropy drift from unmet needs.
-    const needs = this.needsState.getNeeds()
-    this.entropyState.entropy = updateEntropyFromNeeds(needs, this.entropyState.entropy, gameMinutesDelta)
-    this.entropyState = updateEntrapmentState(this.entropyState, delta * TEST_SPEED_MULTIPLIER)
-    this.entropy = this.entropyState.entropy
-    this.isEntrapped = this.entropyState.isEntrapped
-    this.signalStrengthMultiplier = getSignalStrengthMultiplier(this.entropyState.entropy)
-    if (this.entropy >= 100 && !this._gameOver) {
-      this._gameOver = true
-      this._runLog.push({
-        type: 'run_end',
-        timestamp: Date.now(),
-        entropy: this.entropy,
-        gameTimeMinutes: this.gameTimeMinutes,
-        needs: { ...this.needsState.getNeeds() }
-      })
-      this.downloadRunLog()
-      this.scene.start('GameOver')
+    if (this.characterEngine) {
+      this.characterEngine.update(dtMs)
     }
-
-    this.applyPendingNeedDeltas(delta * TEST_SPEED_MULTIPLIER)
-    this.emitRoomUIState()
     this.updateActionProgressBar()
 
     if (this.isExecutingAction && this.player) {
       this.updateActionPath()
-      this.player.update(delta)
+      this.player.update(dtMs)
     }
   }
 
@@ -474,14 +318,8 @@ export class Room extends Phaser.Scene {
     this._interactionDurationMs = durationMs
     this._interactionActionId = actionId
 
-    // Start gradual need change during the action (<< / >> indicators).
-    const effects = ACTION_EFFECTS[actionId]
-    if (effects) {
-      this.pendingNeedDeltas = {}
-      for (const [key, delta] of Object.entries(effects)) {
-        if (NEED_KEYS.includes(key)) this.pendingNeedDeltas[key] = delta
-      }
-      this.pendingNeedChangeTotalMs = durationMs
+    if (this.characterEngine && this.characterEngine.onActionStarted) {
+      this.characterEngine.onActionStarted(actionId, durationMs)
     }
 
     // Lazy-create the progress bar once we actually begin an interaction.
@@ -509,13 +347,9 @@ export class Room extends Phaser.Scene {
   }
 
   finishAction(actionId) {
-    // Need deltas were queued at interaction start and applied gradually during the action.
-
-    // Apply entropy delta from the action metadata.
-    const meta = ACTIONS[actionId]
-    const deltaEntropy = meta && typeof meta.entropyDelta === 'number' ? meta.entropyDelta : 0
-    this.entropyState.entropy = applyEntropyDelta(this.entropyState.entropy, deltaEntropy)
-    this.entropy = this.entropyState.entropy
+    if (this.characterEngine && this.characterEngine.onActionCompleted) {
+      this.characterEngine.onActionCompleted(actionId)
+    }
 
     // Clear interaction progress.
     this._interactionStartAtMs = null
@@ -530,124 +364,5 @@ export class Room extends Phaser.Scene {
     this.events.emit('actionComplete', { actionId })
   }
 
-  /** Every 5s, if no action is running, pick a new action from personality + needs and run it. */
-  startAIActionLoop() {
-    const AI_DECISION_INTERVAL_MS = 5000 / TEST_SPEED_MULTIPLIER
-    const tryScheduleNext = () => {
-      if (this._gameOver) return
-      if (this.entropyState.entropy >= 100) {
-        this._gameOver = true
-        this._runLog.push({
-          type: 'run_end',
-          timestamp: Date.now(),
-          entropy: this.entropyState.entropy,
-          gameTimeMinutes: this.gameTimeMinutes,
-          needs: { ...this.needsState.getNeeds() }
-        })
-        this.downloadRunLog()
-        this.scene.start('GameOver')
-        return
-      }
-      if (this.isExecutingAction) {
-        this.time.delayedCall(AI_DECISION_INTERVAL_MS, tryScheduleNext)
-        return
-      }
-      const actionId = this.chooseNextAction()
-      if (actionId) {
-        this.setReasoning(actionId, this.needsState.getNeeds(), this.defaultTraits)
-        const needs = this.needsState.getNeeds()
-        this._runLog.push({
-          type: 'decision',
-          index: this._runLog.filter((e) => e.type === 'decision').length + 1,
-          decision: actionId,
-          reason: this._reasoningText,
-          needs: { ...needs },
-          entropy: this.entropyState.entropy,
-          gameTimeMinutes: this.gameTimeMinutes,
-          timestamp: Date.now()
-        })
-        this.executeAction(actionId)
-      }
-      this.time.delayedCall(AI_DECISION_INTERVAL_MS, tryScheduleNext)
-    }
-    this.time.delayedCall(AI_DECISION_INTERVAL_MS, tryScheduleNext)
-  }
-
-  /**
-   * Score actions by current needs and personality traits; return one action id (weighted random).
-   */
-  chooseNextAction() {
-    const needs = this.needsState.getNeeds()
-    const traits = this.defaultTraits
-    const scores = {}
-
-    const t = (key) => (traits && traits[key] != null ? traits[key] : 50) / 100
-    const n = (key) => (needs[key] != null ? needs[key] : 50) / 100
-
-    for (const actionId of AVAILABLE_ACTION_IDS) {
-      let score = 0.1
-      const meta = ACTIONS[actionId] || {}
-
-      if (n('boredom') > 0.5) {
-        const curiosity = t('curiosity')
-        const impulsiveness = t('impulsiveness')
-        const comfort = t('comfort_seeking')
-        const perception = t('perception')
-        if (actionId === 'check_phone') score += comfort * 0.5 + impulsiveness * 0.3
-        if (actionId === 'watch_tv') score += comfort * 0.4
-        if (actionId === 'look_out_window') score += curiosity * 0.4 + perception * 0.2
-        if (actionId === 'read_book') score += curiosity * 0.45 + (1 - impulsiveness) * 0.15
-        if (actionId === 'open_computer') score += impulsiveness * 0.3
-        if (actionId === 'sit_on_couch') score += comfort * 0.2
-        if (actionId === 'use_treadmill') score += (1 - comfort) * 0.2
-      }
-
-      if (n('stress') > 0.5) {
-        if (actionId === 'go_back_to_sleep' || actionId === 'sit_on_bed') score += 0.4
-        if (actionId === 'look_out_window' || actionId === 'meditate') score += 0.35
-        if (actionId === 'use_treadmill' || actionId === 'take_shower') score += 0.3
-        if (actionId === 'read_book') score += 0.32
-        if (actionId === 'sit_on_couch') score += 0.2
-      }
-
-      if (n('fatigue') > 0.65) {
-        if (actionId === 'go_back_to_sleep') score += 0.5
-        if (actionId === 'sit_on_bed' || actionId === 'sit_on_couch') score += 0.25
-      }
-      if (n('fatigue') < 0.3 && actionId === 'use_treadmill') score += 0.3
-
-      if (n('hunger') > 0.55 && actionId === 'eat_snack') score += 0.6
-      if (n('thirst') > 0.4 && actionId === 'drink_water') score += 0.5
-
-      if (n('hygiene_need') > 0.5) {
-        if (actionId === 'take_shower') score += 0.55
-        if (actionId === 'use_sink') score += 0.25
-      }
-
-      if (n('stress') > 0.4 && (actionId === 'use_toilet' || actionId === 'use_sink')) score += 0.15
-
-      if (t('curiosity') >= 0.55 && actionId === 'read_book') score += 0.18
-
-      // Entrapment reduces insight-capable options and favors loop actions.
-      if (this.entropyState && this.entropyState.isEntrapped) {
-        if (meta.insightCapable) {
-          score *= 0.01
-        } else if (meta.loopReinforcing) {
-          score *= 1.6
-        } else {
-          score *= 0.25
-        }
-      }
-
-      scores[actionId] = Math.max(0.01, score)
-    }
-
-    const total = Object.values(scores).reduce((a, b) => a + b, 0)
-    let r = Math.random() * total
-    for (const actionId of AVAILABLE_ACTION_IDS) {
-      r -= scores[actionId]
-      if (r <= 0) return actionId
-    }
-    return AVAILABLE_ACTION_IDS[AVAILABLE_ACTION_IDS.length - 1]
-  }
+ 
 }

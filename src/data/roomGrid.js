@@ -1,6 +1,9 @@
 /**
  * Room grid for cardinal-only movement and obstacle avoidance.
- * Tiles inside ROOM_OBJECTS are not walkable. Borders block movement *between* tiles (on the line), so no tiles are consumed — full interior is walkable.
+ *
+ * Tiles inside ROOM_OBJECTS are not walkable.
+ * ROOM_BORDERS are converted into a 1-tile-thick "fence frame" on the grid, so wall
+ * blocking is handled via isWalkable() rather than edge-crossing gap logic.
  */
 
 import { ROOM_OBJECTS, ROOM_BORDERS, TILE_SIZE, ROOM_GRID_COLS, ROOM_GRID_ROWS } from './roomData.js'
@@ -20,6 +23,57 @@ function isGap(b, tx, ty) {
 }
 
 /**
+ * Convert border-rect definitions into actual blocked grid tiles (fences).
+ *
+ * Previously, walls were represented as "blocked edges" (movement crossing checks).
+ * That required the gap coordinate to be interpreted perfectly, and small off-by-one
+ * errors could either block entrances or open accidental passages.
+ *
+ * Now we treat borders as a 1-tile-thick fence frame on the grid, with a single
+ * "hole" at the configured gap coordinate.
+ */
+function buildBorderWallTiles() {
+  const walls = new Set()
+
+  const addWall = (tx, ty) => {
+    if (tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS) return
+    walls.add(`${tx},${ty}`)
+  }
+
+  for (const b of ROOM_BORDERS) {
+    if (b.type !== 'rect') continue
+    const { gridX: gx, gridY: gy, gridW: gw, gridH: gh } = b
+
+    // Vertical edges: x = gx and x = gx + gw
+    for (let ty = gy; ty <= gy + gh; ty++) {
+      const leftX = gx
+      const rightX = gx + gw
+      if (!isGap(b, leftX, ty)) addWall(leftX, ty)
+      if (!isGap(b, rightX, ty)) addWall(rightX, ty)
+    }
+
+    // Horizontal edges: y = gy and y = gy + gh
+    for (let tx = gx; tx <= gx + gw; tx++) {
+      const topY = gy
+      const bottomY = gy + gh
+      if (!isGap(b, tx, topY)) addWall(tx, topY)
+      if (!isGap(b, tx, bottomY)) addWall(tx, bottomY)
+    }
+  }
+
+  return walls
+}
+
+const BORDER_WALL_TILES = buildBorderWallTiles()
+
+export function getBorderWallTiles() {
+  return [...BORDER_WALL_TILES].map((s) => {
+    const [tx, ty] = s.split(',').map((n) => Number(n))
+    return { tx, ty }
+  })
+}
+
+/**
  * True if moving from (fromTx, fromTy) to (toTx, toTy) crosses a border (and the crossing is not at the gap).
  */
 export function borderBlocksMove(fromTx, fromTy, toTx, toTy) {
@@ -30,22 +84,24 @@ export function borderBlocksMove(fromTx, fromTy, toTx, toTy) {
     const { gridX: gx, gridY: gy, gridW: gw, gridH: gh } = b
     if (dx === 1) {
       const leftEdge = gx === toTx && fromTy >= gy && fromTy < gy + gh && !isGap(b, toTx, fromTy)
-      const rightEdge = gx + gw === toTx && fromTy >= gy && fromTy < gy + gh && !isGap(b, fromTx, fromTy)
+      // Crossing the right edge happens at the boundary x coordinate (toTx),
+      // so gap checks must use (boundaryX, fromTy) consistently.
+      const rightEdge = gx + gw === toTx && fromTy >= gy && fromTy < gy + gh && !isGap(b, toTx, fromTy)
       if (leftEdge || rightEdge) return true
     }
     if (dx === -1) {
       const leftEdge = gx === fromTx && fromTy >= gy && fromTy < gy + gh && !isGap(b, fromTx, fromTy)
-      const rightEdge = gx + gw === fromTx && fromTy >= gy && fromTy < gy + gh && !isGap(b, toTx, fromTy)
+      const rightEdge = gx + gw === fromTx && fromTy >= gy && fromTy < gy + gh && !isGap(b, fromTx, fromTy)
       if (leftEdge || rightEdge) return true
     }
     if (dy === 1) {
       const topEdge = gy === toTy && fromTx >= gx && fromTx < gx + gw && !isGap(b, fromTx, toTy)
-      const bottomEdge = gy + gh === toTy && fromTx >= gx && fromTx < gx + gw && !isGap(b, fromTx, fromTy)
+      const bottomEdge = gy + gh === toTy && fromTx >= gx && fromTx < gx + gw && !isGap(b, fromTx, toTy)
       if (topEdge || bottomEdge) return true
     }
     if (dy === -1) {
       const topEdge = gy === fromTy && fromTx >= gx && fromTx < gx + gw && !isGap(b, fromTx, fromTy)
-      const bottomEdge = gy + gh === fromTy && fromTx >= gx && fromTx < gx + gw && !isGap(b, fromTx, toTy)
+      const bottomEdge = gy + gh === fromTy && fromTx >= gx && fromTx < gx + gw && !isGap(b, fromTx, fromTy)
       if (topEdge || bottomEdge) return true
     }
   }
@@ -57,6 +113,10 @@ export function borderBlocksMove(fromTx, fromTy, toTx, toTy) {
  */
 export function isWalkable(tx, ty) {
   if (tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS) return false
+
+  // Fences: derived from ROOM_BORDERS frame.
+  if (BORDER_WALL_TILES.has(`${tx},${ty}`)) return false
+
   for (const obj of ROOM_OBJECTS) {
     if (
       tx >= obj.gridX &&
@@ -149,7 +209,6 @@ export function findPath(fromTx, fromTy, toTx, toTy) {
       const key = `${nx},${ny}`
       if (visited.has(key)) continue
       if (!isWalkable(nx, ny)) continue
-      if (borderBlocksMove(tx, ty, nx, ny)) continue
       visited.add(key)
       parent[key] = { tx, ty }
       if (nx === toTx && ny === toTy) {

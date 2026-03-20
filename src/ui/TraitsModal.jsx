@@ -1,15 +1,17 @@
+import { getCharacterState } from '../systems/character/characterState.js'
+
 const TRAIT_FULL_NAMES = {
   courage: 'Courage',
   discipline: 'Discipline',
-  impulsiveness: 'Impulsiveness',
+  expressiveness: 'Expressiveness',
   logic: 'Logic',
   intuition: 'Intuition',
   curiosity: 'Curiosity',
   empathy: 'Empathy',
-  anxiety: 'Anxiety',
   desire: 'Desire',
-  stability: 'Stability',
-  comfort_seeking: 'Comfort seeking',
+  introspection: 'Introspection',
+  resilience: 'Resilience',
+  imagination: 'Imagination',
   perception: 'Perception'
 }
 
@@ -17,6 +19,7 @@ const TRAIT_IDS = Object.keys(TRAIT_FULL_NAMES)
 
 export function TraitsModal({ open, traits = {}, onClose }) {
   if (!open) return null
+  const { consciousnessLevel } = getCharacterState()
 
   return (
     <>
@@ -27,7 +30,8 @@ export function TraitsModal({ open, traits = {}, onClose }) {
           position: 'fixed',
           inset: 0,
           background: 'rgba(0,0,0,0.6)',
-          zIndex: 1000
+          zIndex: 2000,
+          pointerEvents: 'auto'
         }}
       />
       <div
@@ -45,8 +49,11 @@ export function TraitsModal({ open, traits = {}, onClose }) {
           background: '#252525',
           border: '1px solid #444',
           borderRadius: 4,
-          zIndex: 1001,
-          padding: 20
+          zIndex: 2001,
+          padding: 20,
+          pointerEvents: 'auto',
+          userSelect: 'text',
+          WebkitUserSelect: 'text'
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -64,13 +71,19 @@ export function TraitsModal({ open, traits = {}, onClose }) {
               fontSize: 20,
               cursor: 'pointer',
               lineHeight: 1,
-              padding: 0
+              padding: 0,
+              pointerEvents: 'auto'
             }}
           >
             ×
           </button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+            <span style={{ color: '#c0c0c0' }}>Consciousness</span>
+            <span style={{ color: '#e8c84a' }}>{consciousnessLevel}/5</span>
+          </div>
+          <div style={{ height: 1, background: '#444', width: '100%', marginTop: 2, marginBottom: 2 }} />
           {TRAIT_IDS.map((key) => {
             const v = traits[key] != null ? traits[key] : 50
             const label = TRAIT_FULL_NAMES[key] || key

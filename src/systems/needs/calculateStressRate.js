@@ -11,10 +11,17 @@ export function calculateStressRate(needs, traits, activeArchon = null) {
   if (needs.energy < 25) rate += 0.8
   if (needs.boredom > 75) rate += 0.6
 
-  const anxiety = getTraitValue(traits, 'anxiety')
-  const stability = getTraitValue(traits, 'stability')
-  const anxietyFactor = ((anxiety ?? 50) - 50) / 100
-  const stabilityFactor = ((stability ?? 50) - 50) / 100
+  // Retired traits v1 are now emergent from new traits:
+  // - anxiety → low courage + low resilience + high desire
+  // - stability → resilience
+  const courage = getTraitValue(traits, 'courage')
+  const resilience = getTraitValue(traits, 'resilience')
+  const desire = getTraitValue(traits, 'desire')
+
+  const anxietyEmergent = (100 - (courage ?? 50)) * 0.4 + (100 - (resilience ?? 50)) * 0.4 + (desire ?? 50) * 0.2
+  const anxietyFactor = (anxietyEmergent - 50) / 100
+  const stabilityFactor = ((resilience ?? 50) - 50) / 100
+
   rate += anxietyFactor * 0.8
   rate -= stabilityFactor * 0.6
 

@@ -12,6 +12,7 @@
 import { TRAIT_IDS, PLANET_WEIGHTS, BASELINE_TRAIT_SCORE, TRAIT_MIN, TRAIT_MAX } from './constants.js'
 import { signDeltas } from './signDeltas.js'
 import { getDignity, applyDignityToDeltas } from './dignities.js'
+import { computeTraitTensionsFromBreakdown } from './traitTension.js'
 
 const SOUTH_NODE_MULTIPLIER = 1.3
 const NORTH_NODE_MULTIPLIER = -0.4
@@ -169,6 +170,20 @@ export function generateTraitSheet(chart) {
 export function generateTraitSheetFromText(chartText) {
   const chart = parseChartFromText(chartText)
   return generateTraitSheet(chart)
+}
+
+/**
+ * Scores, per-trait breakdown, and tension map (for LLM / trait language).
+ * @param {Array<{ planet: string, sign: string }>} chart
+ */
+export function generateTraitSheetDetailed(chart) {
+  const breakdown = getTraitSheetBreakdown(chart)
+  const scores = {}
+  for (const id of TRAIT_IDS) {
+    scores[id] = breakdown[id].final
+  }
+  const tensions = computeTraitTensionsFromBreakdown(breakdown)
+  return { scores, breakdown, tensions }
 }
 
 /**

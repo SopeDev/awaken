@@ -27,13 +27,13 @@ export function NeedsPanel({ needs = {}, pendingNeedDeltas = {}, onOpenTraits })
         onMouseOut={(e) => (e.currentTarget.style.color = '#b0b0b0')}
         style={{
           position: 'absolute',
-          left: menuLeft,
-          top: NEEDS_PANEL_HEIGHT / 2 - 20,
+          left: menuLeft -8,
+          top: NEEDS_PANEL_HEIGHT / 2 - 60,
           width: MENU_WIDTH - 8,
-          height: NEEDS_PANEL_HEIGHT - 20,
+          height: NEEDS_PANEL_HEIGHT - 100,
           margin: 0,
-          padding: 0,
-          border: 'none',
+          padding: '0 0 4px 0',
+          border: '1px solid #444',
           background: 'transparent',
           color: '#b0b0b0',
           fontSize: 28,
@@ -44,7 +44,7 @@ export function NeedsPanel({ needs = {}, pendingNeedDeltas = {}, onOpenTraits })
       >
         ☺
       </button>
-      <div style={{ position: 'absolute', left: needsLeft, top: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ position: 'absolute', left: needsLeft, top: 12, display: 'flex', flexDirection: 'column', gap: 2 }}>
         {NEED_KEYS.map((key, i) => (
           <NeedBar
             key={key}

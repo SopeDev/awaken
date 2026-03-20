@@ -8,11 +8,10 @@ export const ACTIONS = {
     objectTypeId: 'phone',
     durationMs: 10000,
     label: 'check my phone',
-    // Loop reinforcer: fast boredom relief but increases repetition risk
     loopReinforcing: true,
     repetitionRisk: 'high',
-    // Simple meta so UI/LLM can reason without implementing Archons yet
-    entropyDelta: +10
+    habituationRate: 0.70,
+    habituationNeeds: ['boredom']
   },
   go_back_to_sleep: {
     objectTypeId: 'bed',
@@ -21,7 +20,8 @@ export const ACTIONS = {
     loopReinforcing: false,
     repetitionRisk: 'medium',
     avoidancePositive: true,
-    entropyDelta: +5
+    habituationRate: 0.85,
+    habituationNeeds: []
   },
   look_out_window: {
     objectTypeId: 'window',
@@ -30,7 +30,8 @@ export const ACTIONS = {
     insightCapable: true,
     loopReinforcing: false,
     repetitionRisk: 'low',
-    entropyDelta: -8
+    habituationRate: 1.0,
+    habituationNeeds: []
   },
   watch_tv: {
     objectTypeId: 'tv',
@@ -38,15 +39,8 @@ export const ACTIONS = {
     label: 'watch TV',
     loopReinforcing: true,
     repetitionRisk: 'high',
-    entropyDelta: +8
-  },
-  sit_on_bed: {
-    objectTypeId: 'bed',
-    durationMs: 37500,
-    label: 'sit on the bed',
-    loopReinforcing: false,
-    repetitionRisk: 'low',
-    entropyDelta: +2
+    habituationRate: 0.72,
+    habituationNeeds: ['boredom']
   },
   open_computer: {
     objectTypeId: 'computer',
@@ -54,9 +48,9 @@ export const ACTIONS = {
     label: 'open the computer',
     loopReinforcing: true,
     repetitionRisk: 'medium',
-    entropyDelta: +7,
-    // TODO: later we can split "conscious browsing" vs compulsive scrolling
-    archonTags: ['distraction', 'doubt']
+    archonTags: ['distraction', 'doubt'],
+    habituationRate: 0.68,
+    habituationNeeds: ['boredom']
   },
   read_book: {
     objectTypeId: 'books',
@@ -64,7 +58,8 @@ export const ACTIONS = {
     label: 'read a book',
     loopReinforcing: false,
     repetitionRisk: 'low',
-    entropyDelta: -2
+    habituationRate: 0.95,
+    habituationNeeds: ['boredom', 'stress']
   },
   use_treadmill: {
     objectTypeId: 'treadmill',
@@ -72,9 +67,9 @@ export const ACTIONS = {
     label: 'use the treadmill',
     loopReinforcing: false,
     repetitionRisk: 'medium',
-    entropyDelta: -1,
-    // TODO: later if "used consciously" this can become lower-entropy
-    archonTags: ['control', 'discipline']
+    archonTags: ['control', 'discipline'],
+    habituationRate: 0.97,
+    habituationNeeds: ['stress', 'boredom']
   },
   eat_snack: {
     objectTypeId: 'refrigerator',
@@ -82,7 +77,8 @@ export const ACTIONS = {
     label: 'get a snack',
     loopReinforcing: false,
     repetitionRisk: 'low',
-    entropyDelta: 0
+    habituationRate: 1.0,
+    habituationNeeds: []
   },
   sit_on_couch: {
     objectTypeId: 'couch',
@@ -90,13 +86,13 @@ export const ACTIONS = {
     label: 'sit on the couch',
     loopReinforcing: false,
     repetitionRisk: 'low',
-    entropyDelta: +1
+    habituationRate: 0.9,
+    habituationNeeds: ['stress']
   },
-  drink_water: { objectTypeId: 'water_dispenser', durationMs: 6250, label: 'get some water', loopReinforcing: false, repetitionRisk: 'low', entropyDelta: 0 },
-  take_shower: { objectTypeId: 'shower', durationMs: 15000, label: 'take a shower', loopReinforcing: false, repetitionRisk: 'low', entropyDelta: -2 },
-  use_toilet: { objectTypeId: 'toilet', durationMs: 6250, label: 'use the bathroom', loopReinforcing: false, repetitionRisk: 'low', entropyDelta: 0 },
-  use_sink: { objectTypeId: 'sink', durationMs: 10000, label: 'use the sink', loopReinforcing: false, repetitionRisk: 'low', entropyDelta: -1 },
-  meditate: { objectTypeId: 'couch', durationMs: 25000, label: 'meditate on the couch', insightCapable: true, loopReinforcing: false, repetitionRisk: 'low', entropyDelta: -6 }
+  drink_water: { objectTypeId: 'water_dispenser', durationMs: 6250, label: 'get some water', loopReinforcing: false, repetitionRisk: 'low', habituationRate: 1.0, habituationNeeds: [] },
+  take_shower: { objectTypeId: 'shower', durationMs: 15000, label: 'take a shower', loopReinforcing: false, repetitionRisk: 'low', habituationRate: 0.95, habituationNeeds: ['stress'] },
+  use_toilet: { objectTypeId: 'toilet', durationMs: 6250, label: 'use the bathroom', loopReinforcing: false, repetitionRisk: 'low', habituationRate: 1.0, habituationNeeds: [] },
+  use_sink: { objectTypeId: 'sink', durationMs: 10000, label: 'use the sink', loopReinforcing: false, repetitionRisk: 'low', habituationRate: 1.0, habituationNeeds: [] },
 }
 
 export const AVAILABLE_ACTION_IDS = Object.keys(ACTIONS)

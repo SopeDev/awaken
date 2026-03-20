@@ -31,7 +31,7 @@ export const ROOM_PLACEMENTS = [
   { objectTypeId: 'couch', gridX: 2, gridY: 4 },
   { objectTypeId: 'water_dispenser', gridX: 0, gridY: 2 },
   { objectTypeId: 'shower', gridX: 9, gridY: 0 },
-  { objectTypeId: 'toilet', gridX: 10, gridY: 3 },
+  { objectTypeId: 'toilet', gridX: 10, gridY: 1 },
   { objectTypeId: 'sink', gridX: 10, gridY: 2 }
 ]
 
@@ -55,8 +55,8 @@ export const AVATAR_START_TILE = { x: 5, y: 9 }
  * - type: 'rect' — perimeter blocks; gapGridX, gapGridY is the one walkable tile (the opening).
  */
 export const ROOM_BORDERS = [
-  { type: 'rect', gridX: 8, gridY: 0, gridW: 3, gridH: 4, gapGridX: 8, gapGridY: 2 },
-  { type: 'rect', gridX: 0, gridY: 0, gridW: 4, gridH: 4, gapGridX: 3, gapGridY: 2 }
+  { type: 'rect', gridX: 8, gridY: 0, gridW: 3, gridH: 3, gapGridX: 8, gapGridY: 2 },
+  { type: 'rect', gridX: 0, gridY: 0, gridW: 3, gridH: 3, gapGridX: 3, gapGridY: 2 }
 ]
 
 /**

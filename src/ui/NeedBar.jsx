@@ -14,18 +14,19 @@ export function NeedBar({ needKey, value = 0, pendingDelta }) {
   const showRight = typeof pendingDelta === 'number' && pendingDelta > 0
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', height: 18, gap: 4 }}>
-      {showLeft && (
+    <div style={{ display: 'flex', alignItems: 'center', height: 16, gap: 4 }}>
+      <span style={{ fontSize: 12, color: '#b0b0b0', width: 88, flexShrink: 0 }}>{label}</span>
+      {showLeft ? (
         <span style={{ fontSize: 11, color: '#e8c84a', textShadow: '0 0 4px #e8c84a', width: 18, textAlign: 'right' }}>
           &lt;&lt;
         </span>
+      ) : (
+        <span style={{ width: 18 }} />
       )}
-      {!showLeft && <span style={{ width: 18 }} />}
-      <span style={{ fontSize: 12, color: '#b0b0b0', width: 88, flexShrink: 0 }}>{label}</span>
       <div
         style={{
           width: 180,
-          height: 14,
+          height: 12,
           background: '#2a2a2a',
           borderRadius: 1,
           overflow: 'hidden',
@@ -41,12 +42,13 @@ export function NeedBar({ needKey, value = 0, pendingDelta }) {
           }}
         />
       </div>
-      {showRight && (
-        <span style={{ fontSize: 11, color: '#e8c84a', textShadow: '0 0 4px #e8c84a', width: 18 }}>
+      {showRight ? (
+        <span style={{ fontSize: 11, color: '#e8c84a', textShadow: '0 0 4px #e8c84a', width: 18, textAlign: 'left' }}>
           &gt;&gt;
         </span>
+      ) : (
+        <span style={{ width: 18 }} />
       )}
-      {!showRight && <span style={{ width: 18 }} />}
     </div>
   )
 }

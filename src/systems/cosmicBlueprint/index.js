@@ -28,8 +28,16 @@ export {
   parseChartFromText,
   generateTraitSheet,
   generateTraitSheetFromText,
+  generateTraitSheetDetailed,
   getTraitSheetBreakdown,
   getPlacementContributions
 } from './generateTraitSheet.js'
+
+export {
+  TRAIT_COMMUNICATION_MODES,
+  CONFLICT_DESCRIPTIONS,
+  getTraitCommunicationMode,
+  computeTraitTensionsFromBreakdown
+} from './traitTension.js'
 
 export { exampleChart, exampleChart1, exampleChart2 } from './data/exampleChart.js'

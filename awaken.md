@@ -368,44 +368,66 @@ The LLM is only called when:
 
 ---
 
-### Input Schema
+### Backend vs LLM (no raw numbers to the model)
+
+The **browser** posts structured game state to `POST /api/decision`. The **server** converts needs and traits into natural language (plus optional trait *tension* from the Cosmic Blueprint placement breakdown), selects the system prompt from **consciousness level** (0–5), and only then calls the LLM.
+
+**The LLM never receives raw numbers.** It does not see consciousness score, trait values, need meters, or any game-system vocabulary. It receives prose fields such as `needs_description` and `traits_description`, a list of allowed action IDs, and optional narrative context.
+
+**Request payload (Phaser → backend)** — typical shape:
 
 ```json
 {
-  "consciousness_level": 1,
-  "consciousness_score": 22,
-  "traits": {
-    "courage": 62,
-    "discipline": 55,
-    "impulsiveness": 42,
-    "logic": 76,
-    "intuition": 56,
-    "curiosity": 65,
-    "empathy": 60,
-    "anxiety": 50,
-    "desire": 52,
-    "stability": 53,
-    "comfort_seeking": 56,
-    "perception": 66
+  "consciousnessLevel": 1,
+  "needs": {
+    "hunger": 41,
+    "thirst": 38,
+    "fatigue": 52,
+    "boredom": 72,
+    "stress": 45,
+    "connection_need": 36,
+    "hygiene_need": 25
   },
-  "player_signal": "dream of light and bird",
-  "environment": "bedroom",
-  "available_actions": []
+  "traits": {
+    "courage": 56,
+    "discipline": 48,
+    "expressiveness": 52,
+    "logic": 73,
+    "intuition": 59,
+    "curiosity": 62,
+    "empathy": 55,
+    "desire": 60,
+    "introspection": 50,
+    "resilience": 48,
+    "imagination": 45,
+    "perception": 65
+  },
+  "traitTensions": null,
+  "availableActions": ["check_phone", "look_out_window"],
+  "playerSignal": null,
+  "recentActions": ["sit_on_couch"],
+  "significantMemory": null
 }
 ```
 
-### Output Schema
+`traitTensions` is optional: when present (from chart breakdown), the server describes personality **conflict** (dead-zone scores with high opposing contributions) instead of flattening everything to a single score line.
+
+### Output Schema (backend → Phaser)
 
 ```json
 {
-  "intent": "",
-  "action": "",
-  "reason": "",
-  "emotion": "",
-  "priority": 0.0,
-  "interruptible": true
+  "action": "look_out_window",
+  "thought": "first-person inner monologue",
+  "reason": "one short sentence why this action",
+  "unease": "optional, level 1",
+  "pattern_noticed": "optional, level 2",
+  "signal_response": "optional, level 3",
+  "guidance": "optional, level 4",
+  "state": "optional one word, level 5"
 }
 ```
+
+The full object should be stored in the run log for replay and UI.
 
 ### Execution Flow
 
@@ -484,79 +506,249 @@ NOT for:
 
 ---
 
-## 7. Consciousness Level System
+## 7. Awareness Meter & Consciousness Progression
 
-The **Consciousness Level** is the core progression meter of the game.
-It is a single axis with two opposing forces:
+### 7.1 Two Distinct Systems
+
+Before defining the meter, a critical naming distinction:
+
+**Entropy** — a force, not a meter. Entropy is the pressure applied by Archons,
+repetitive loops, avoidance behavior, and disconnection from self. It is invisible.
+You observe its effects. It is never displayed directly to the player.
+
+**The Awareness Meter** — what entropy acts on. This is the progression bar.
+It measures how present and conscious the avatar is within their current level.
+Entropy drains it. Insight events and genuine choices fill it.
+
+### 7.2 The Awareness Meter
+
+Each of the 6 consciousness levels (0–5) has its own independent Awareness Meter,
+scored 0–100.
 
 ```
-ENTROPY ←————————————————————→ CONSCIOUSNESS
-   0              50               100
+0 ────────────────────── 50 ────────────────────── 100
+CRITICAL STATE           START                  LEVEL UP
 ```
 
-This is the character level system. As the avatar levels up in consciousness,
-the player gains more access, more abilities, and more direct control.
-This is the central metaphysical premise of the game made mechanical.
+Universal Rules
 
----
+- Always starts at 50 — entering a level for the first time, leveling up,
+  or regressing back to a level. No exceptions. 50 is always the entry point.
+- Fills toward 100 — consciousness events, insight moments, genuine choices,
+  player signals landing, dream completions
+- Drains toward 0 — entropy pressure, repetitive loops, avoidance,
+  Archon activity, stagnation
+- 100 — level up threshold. Cutscene fires. New level begins at 50
+- 0 — critical state begins. No immediate consequence. A sustained timer starts
 
-### The Two Forces
+The meter always spans 0–100. What changes is how much a given event fills it.
 
-**Consciousness** is built through:
-- Meditation and reflection
-- Courageous decisions
-- Sustained discipline
-- Truthful behavior
-- Curiosity and exploration
-- Helping other characters
+Looking out the window at Level 1: +10 points
+Looking out the window at Level 4: +1 point
 
-**Entropy** is applied by:
-- The Archons and the systems they control
-- Fear and avoidance loops
-- Addiction and distraction
-- Comfort-seeking behavior
-- Dishonesty and self-deception
+Growth requires increasingly deeper engagement at higher levels.
 
-The game world is designed to constantly apply entropy pressure.
-The player's job is to counteract it through influence and signals.
+### 7.3 The Six Levels
 
----
+| Level | Name | Fill difficulty | Notes |
+|-------|------|----------------|-------|
+| 0 | Asleep | Tutorial only | Completed by finishing the first dream. Fast by design |
+| 1 | Curious | Light | First real waking loop |
+| 2 | Seeking | Moderate | Requires insight chains, not just actions |
+| 3 | Awakening | Hard | Rarer events needed. Shadow confrontations count |
+| 4 | Alignment | Very hard | Dream completions, major insight only |
+| 5 | Integration | Endgame grind | Extremely rare events. The final stretch |
 
-### The Six Consciousness Levels
+### 7.4 What Fills the Meter
 
-| Level | Name | Score | Avatar State | Player Access |
-|-------|------|-------|-------------|---------------|
-| 0 | **Asleep** | 0–16 | Fully automatic. Habits and impulses dominate. No awareness of guidance. | Observe only. Signals are ignored. |
-| 1 | **Curious** | 17–33 | Begins questioning patterns. Occasional flickers of self-observation. | Dream signals land occasionally. |
-| 2 | **Seeking** | 34–50 | Actively explores meaning. Intuition pulses register. Senses something is guiding it. | Intuition pulses and synchronicities work. |
-| 3 | **Awakening** | 51–67 | Clearly senses the player's presence. Begins seeking guidance. | Direct nudges available. Signals land consistently. |
-| 4 | **Alignment** | 68–83 | Collaborates with the player consciously. Actively works toward growth. | Most player abilities unlocked. Avatar requests guidance. |
-| 5 | **Integration** | 84–100 | Understands the player IS itself. Full merger of avatar and Higher Self. | Full direct control. Avatar and player are one. |
+Major fills (insight events)
 
----
+- Insight chain completes (e.g. bird → go outside thought unlocked)
+- New action unlocked through insight
+- Dream zone completed
+- Archon Shadow faced and integrated
+- NPC awakening assisted
+- First time an action is taken consciously after previously doing it automatically
 
-### How Traits Relate to the Consciousness Meter
+Minor fills (genuine choice events)
 
-Character traits (section 9) are the **starting psychological raw material** —
-they determine how easily the consciousness score moves in each direction.
+- Avatar breaks a repetitive loop with a novel action
+- Player signal lands and the avatar acts on it
+- Avatar produces a `pattern_noticed` response (level 2+)
+- Avatar produces a `signal_response` response (level 3+)
+- Need genuinely resolved rather than numbed (eating when actually hungry vs
+  eating for the third time as avoidance behavior)
 
-Traits do not become the meter. They influence how it moves:
+Passive fills
 
-- High **intuition** → player signals move the meter more efficiently
-- High **comfort_seeking** + high **anxiety** → Archons move the meter more efficiently
-- High **perception** → avatar notices entropy patterns sooner, slowing the drift
-- High **stability** → gains hold longer, losses recover faster
-- Low **discipline** → entropy gains after each Archon encounter are harder to reverse
+- Time spent in dream layer (passive trickle while player is in dream)
+- Consecutive decisions with novel actions (no repetition in last 5)
 
----
+### 7.5 What Drains the Meter
 
-### Consciousness Score in the LLM
+Repetition penalty (primary drain source)
+Same action taken consecutively within the recent action window
 
-The current `consciousness_level` (0–5) and `consciousness_score` (0–100)
-are always included in the LLM decision input.
+```
+1st time:   no drain
+2nd time:   -2 points
+3rd time:   -5 points
+4th time:   -10 points
+5th+ time:  -15 points per repeat
+```
 
-At level 0, the LLM receives no player signal and makes decisions purely from traits and entropy state.
-At level 5, the player has full override capability — the LLM defers to player input.
+Entropy is not about what you do. It is about the pattern and quality of engagement.
+The phone once is not entropy. The phone five times because you cannot choose otherwise is entropy.
+
+Avoidance drain
+When the LLM `reason` field indicates clear avoidance behavior (escaping a feeling rather than moving toward something), a small drain fires.
+This requires backend analysis of the `reason` field at decision time.
+
+Archon pressure
+Each active Archon applies a passive drain rate based on the avatar's trait vulnerabilities.
+Drain rate increases the longer the Archon is active without the player breaking its influence.
+
+Stagnation drain
+If the avatar cycles through the same 2–3 actions for an extended period without any novel decision or player signal landing, a slow passive drain begins.
+This represents the world applying entropy as default.
+
+Critical state amplification
+Once the meter hits 0 and critical state begins, if the player fails to pull the meter back above 0, the drain rate accelerates.
+The longer the critical state is sustained, the harder it becomes to recover.
+
+### 7.6 The Critical State
+
+When the Awareness Meter hits 0, the avatar enters Critical State.
+This is not immediately a level loss — it is a warning with a sustained timer.
+
+What happens at Critical State
+
+- The game does not pause. The avatar continues making decisions.
+- Core mechanical requirement is defined below:
+
+Core mechanics
+
+- A regression timer starts when the meter hits 0
+- If the player manages to pull the meter above 0 before the regression timer expires, critical state ends and no level loss occurs
+- If the regression timer expires while the meter remains at 0, regression fires into a level down event
+
+Recovery window
+If the player pulls the meter back above 0 before regression resolves, critical state ends.
+The meter begins climbing from wherever it recovered.
+
+The recovery window duration scales with level
+
+- Level 1: short window — roots aren't deep, regression comes fast
+- Level 4: longer window — genuine integration takes longer to dissolve
+
+### 7.7 Level Up Event
+
+When the meter reaches 100, a level up event fires.
+
+The game stops. A cutscene plays — likely involving the dream layer, a symbolic visual shift, or a moment of genuine realization for the avatar.
+
+After the cutscene, the new level begins at 50.
+A new dream zone becomes accessible.
+New player abilities unlock (see section 5.2).
+
+Transition cutscenes
+
+| Transition | Cutscene theme |
+|------------|------------------|
+| 0 → 1 | First dream contact — something unnamed shifts on waking |
+| 1 → 2 | The avatar notices their own loop for the first time |
+| 2 → 3 | Something is clearly guiding them — they can feel it |
+| 3 → 4 | The avatar begins to trust the guidance |
+| 4 → 5 | The separation dissolves — dream and waking merge |
+
+### 7.8 Level Down Event
+
+When the regression timer expires during critical state, a level down event fires.
+
+The game stops. A cutscene plays — something dims or contracts.
+An ability goes dark. The avatar returns to an earlier way of being.
+
+After the cutscene, the previous level begins at 50.
+The lost ability is unavailable until the level is regained.
+
+### 7.9 Level 0 — Special Case
+
+Level 0 starts at 50 like all others but has no regression.
+You cannot fall below level 0. There is no lower level.
+
+At level 0, critical state still begins when the meter hits 0, but the regression timer never resolves into a level loss.
+The avatar stays in critical state until the player finds a way to break the loop and start filling the meter again.
+
+Level 0 to Level 1 is completed by finishing the dream tutorial.
+The tutorial completion fires +50 points directly, pushing from 50 to 100.
+The tutorial is the onboarding, not the game.
+
+### 7.10 Trait Influence on the Awareness Meter
+
+Traits affect how the meter moves, not where it starts.
+
+| Trait | Effect on meter |
+|-------|------------------|
+| Resilience | Larger recovery window before regression fires — harder to delevel |
+| Discipline | Meter drains slower passively — stagnation drain reduced |
+| Intuition | Player signals fill the meter more efficiently when they land |
+| Imagination | At higher levels, harder to gain points without it — can't conceive the next step |
+| Perception | Detects entropy patterns sooner — repetition penalty fires slightly later |
+| Introspection | Pattern breaks (novel decisions after loops) give slightly more fill |
+
+### 7.11 Meter Fill Rate by Level
+
+The same event fills less meter at higher levels.
+This is the primary mechanic that makes higher levels a genuine grind.
+
+```javascript
+const meterFillMultiplier = {
+  0: 2.0,   // tutorial — events fill double
+  1: 1.5,   // early game — generous
+  2: 1.0,   // baseline
+  3: 0.6,   // requires deliberate play
+  4: 0.3,   // significant events only
+  5: 0.15   // endgame grind
+}
+
+// Applied to every fill event:
+actualFill = baseFill * meterFillMultiplier[consciousnessLevel]
+```
+
+The drain rate does NOT scale — entropy pressure is constant regardless of level.
+Only the fill rate decreases.
+
+### 7.12 Summary
+
+```
+Game starts
+    ↓
+Level 0 at 50
+    ↓
+Dream tutorial → +50 → Level 0 hits 100
+    ↓
+LEVEL UP CUTSCENE
+    ↓
+Level 1 at 50
+    ↓
+Waking world loop — entropy and insight compete
+    ↓
+Meter fills toward 100 → LEVEL UP CUTSCENE → next level at 50
+    ↓          ↓
+    (or)    Meter drains toward 0 → CRITICAL STATE
+                ↓
+            Recovery window — player fights to pull it back
+                ↓              ↓
+            Recovered      Timer expires
+            (no loss)          ↓
+                        LEVEL DOWN CUTSCENE
+                            ↓
+                        Previous level at 50
+                        Lost ability goes dark
+```
+
+The player is never safe. Consciousness is a practice, not a destination.
+The game always pushes back.
 
 ---
 
@@ -605,6 +797,9 @@ Entrapment requires something unexpected to escape — a very specific vulnerabi
 
 ## 9. Cosmic Blueprint System
 
+See `src/systems/CosmicBlueprintSystem.md` for the full specification.
+
+<!--
 Each avatar possesses a **Cosmic Blueprint** — an astrological natal chart
 that defines their innate psychological tendencies as starting trait values.
 
@@ -1214,6 +1409,7 @@ It **IS** meant to:
 - make each playthrough feel like a distinct human story
 
 ---
+-->
 
 ## 10. Avatar Needs System
 
@@ -1500,41 +1696,19 @@ can tip the avatar toward the window even when phone is weighted higher.
 
 ## 10.7 LLM Input Schema — Updated
 
-The needs state is included in every LLM decision call alongside traits and consciousness level.
+Needs and traits are still **computed in the game**, but the **LLM prompt** is built on the server after conversion to natural language. The consciousness **level** (0–5) picks the system prompt; numerical consciousness score is not exposed to the model.
 
-```json
-{
-  "consciousness_level": 1,
-  "consciousness_score": 22,
-  "needs": {
-    "hunger": 41,
-    "thirst": 38,
-    "fatigue": 52,
-    "boredom": 72,
-    "stress": 45,
-    "connection_need": 36,
-    "hygiene_need": 25
-  },
-  "traits": {
-    "fire":  { "courage": 56, "discipline": 39, "impulsiveness": 33 },
-    "air":   { "logic": 73, "intuition": 59, "curiosity": 62 },
-    "water": { "empathy": 55, "anxiety": 56, "desire": 60 },
-    "earth": { "stability": 53, "comfort_seeking": 44, "perception": 65 }
-  },
-  "player_signal": "dream of light and bird",
-  "environment": "bedroom",
-  "available_actions": [
-    "go_back_to_sleep",
-    "check_phone",
-    "watch_tv",
-    "sit_on_bed",
-    "go_to_bathroom",
-    "open_computer",
-    "read_book",
-    "look_out_window"
-  ]
-}
-```
+**Backend receives** (among other fields): raw `needs`, `traits` (flat or grouped — grouped is flattened server-side), optional `traitTensions` from Cosmic Blueprint breakdown, `consciousnessLevel`, `availableActions`, optional `playerSignal`, `recentActions`, and (from level 2+) `significantMemory`.
+
+**The model sees** assembled prose (e.g. `needs_description`, `traits_description`) and a list of action IDs — never the raw meters or trait integers.
+
+| Setting | Value |
+|--------|--------|
+| Default model | `gpt-4.1-mini` (`LLM_MODEL`; set to any id your project allows) |
+| Local dev | `USE_LOCAL_LLM=true` → Ollama at `OLLAMA_HOST` |
+| Temperature | 0.85 |
+| Max tokens | 200 |
+| Response | JSON object mode |
 
 ---
 

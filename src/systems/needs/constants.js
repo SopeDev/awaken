@@ -52,7 +52,7 @@ export const ACTION_EFFECTS = {
   look_out_window: { boredom: -10, stress: -10, connection_need: -5 },
   open_computer: { boredom: -35, stress: 10 },
   read_book: { boredom: -15, stress: -10, fatigue: -5 },
-  use_treadmill: { stress: -30, fatigue: 20, hunger: 10, thirst: 20, boredom: -10 },
+  use_treadmill: { stress: -30, fatigue: 20, hunger: 10, thirst: 20, boredom: -10, hygiene_need: 40 },
   eat_snack: { hunger: -40 },
   sit_on_couch: { fatigue: -10, stress: -5, boredom: 5 },
   drink_water: { thirst: -50 },

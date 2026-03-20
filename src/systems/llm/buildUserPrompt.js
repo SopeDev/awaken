@@ -31,7 +31,7 @@ export function buildUserPromptContent(raw) {
   const consciousnessLevel = Number(raw.consciousnessLevel) || 0
   const needsDesc = buildNeedsDescription(raw.needs || {}, consciousnessLevel)
   const traitsDesc =
-    consciousnessLevel >= 2
+    consciousnessLevel >= 1
       ? buildTraitsDescription(consciousnessLevel, raw.traits || {}, raw.traitTensions ?? null)
       : null
   const playerBit = describePlayerSignal(raw.playerSignal)

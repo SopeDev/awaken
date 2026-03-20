@@ -34,8 +34,7 @@ const FILL_BASES = {
   signal_response: 8,
   guidance: 10,
   state: 12,
-  novel_action: 2,
-  broke_loop: 3
+  broke_loop: 3.5
 }
 
 const REPETITION_DRAIN_POINTS_BY_STREAK_LEN = {
@@ -72,7 +71,6 @@ const REGRESSION_WINDOW_MS_BY_LEVEL = {
   5: 26000
 }
 
-const NOVEL_ACTION_RECENT_WINDOW = 10
 const NEED_RESOLUTION_MIN_NEED = 75
 const NEED_RESOLUTION_COOLDOWN_DECISIONS = 5
 const PSYCHOLOGICAL_NEED_KEYS = ['boredom', 'stress', 'connection_need']
@@ -107,6 +105,31 @@ function buildRealWorldTimestamp(sessionStartedAtMs) {
     elapsedMs,
     elapsedSeconds: elapsedMs / 1000,
     elapsedMinutes: elapsedMs / 60000
+  }
+}
+
+function buildLlmReasoningPayload(decision, fallbackReasonText) {
+  if (decision && typeof decision === 'object') {
+    return {
+      source: 'llm',
+      thought: typeof decision.thought === 'string' ? decision.thought : '',
+      reason: typeof decision.reason === 'string' ? decision.reason : '',
+      unease: decision.unease != null && decision.unease !== '' ? decision.unease : null,
+      pattern_noticed: decision.pattern_noticed != null && decision.pattern_noticed !== '' ? decision.pattern_noticed : null,
+      signal_response: decision.signal_response != null && decision.signal_response !== '' ? decision.signal_response : null,
+      guidance: decision.guidance != null && decision.guidance !== '' ? decision.guidance : null,
+      state: decision.state != null && decision.state !== '' ? decision.state : null
+    }
+  }
+  return {
+    source: 'fallback',
+    thought: '',
+    reason: typeof fallbackReasonText === 'string' ? fallbackReasonText : '',
+    unease: null,
+    pattern_noticed: null,
+    signal_response: null,
+    guidance: null,
+    state: null
   }
 }
 
@@ -166,7 +189,6 @@ export function getCharacterEngine() {
     _needResolutionLastDecisionByNeed: {},
 
     // Per-action context captured when the action is chosen.
-    _pendingActionNovelty: false,
     _activeActionDecision: null,
     _activeActionReasonText: '',
     _activeHabituationCounterKeys: [],
@@ -181,7 +203,7 @@ export function getCharacterEngine() {
     _reasoningText: 'Waiting for next decision…',
     _lastLLMDecision: null,
 
-    // Recent actions for LLM context and novelty detection.
+    // Recent actions for LLM context.
     _recentActionIds: [],
     _suppressAIUntilMs: 0,
 
@@ -547,12 +569,6 @@ export function getCharacterEngine() {
         addPositiveFill('state', fill)
       }
 
-      // Novel action fill (passive).
-      if (this._pendingActionNovelty) {
-        const fill = FILL_BASES.novel_action * meterFillMultiplier
-        addPositiveFill('novel_action', fill)
-      }
-
       // Need resolution fill (heuristic).
       if (needsBefore && needsAfter && ACTION_EFFECTS[actionId]) {
         const fatigueBefore = needsBefore.fatigue ?? 0
@@ -636,6 +652,7 @@ export function getCharacterEngine() {
           type: 'action_complete',
           actionId,
           level: levelAtAction,
+          llmReasoning: buildLlmReasoningPayload(decision, this._activeActionReasonText),
           realWorldTimestamp,
           needsAtActionStart: needsBefore ? { ...needsBefore } : null,
           awarenessBefore,
@@ -658,7 +675,6 @@ export function getCharacterEngine() {
       }
 
       // Clear per-action context.
-      this._pendingActionNovelty = false
       this._activeActionNeedsSnapshot = null
       this._activeActionReasonText = ''
       this._activeActionDecision = null
@@ -685,7 +701,7 @@ export function getCharacterEngine() {
           traitTensions,
           availableActions: [...AVAILABLE_ACTION_IDS],
           playerSignal,
-          recentActions: this._recentActionIds.slice(-3),
+          recentActions: this._recentActionIds.slice(-6),
           significantMemory
         })
       })
@@ -829,21 +845,16 @@ export function getCharacterEngine() {
         }
 
         if (actionId) {
-          const prevWindow = this._recentActionIds.slice(-NOVEL_ACTION_RECENT_WINDOW)
-          const isNovel = !prevWindow.includes(actionId)
-          this._pendingActionNovelty = isNovel
-
           this._activeActionDecision = this._lastLLMDecision
           this._activeActionReasonText = this._reasoningText
 
           this._recentActionIds.push(actionId)
-          if (this._recentActionIds.length > 10) this._recentActionIds = this._recentActionIds.slice(-10)
+          if (this._recentActionIds.length > 20) this._recentActionIds = this._recentActionIds.slice(-20)
 
           const started = this.scene.executeAction(actionId)
           if (!started) {
             this._activeActionDecision = null
             this._activeActionReasonText = ''
-            this._pendingActionNovelty = false
           }
         }
 

@@ -1,5 +1,5 @@
 /**
- * User message body for the decision LLM — all natural language.
+ * User message body for the decision LLM — situational context in plain language.
  */
 
 import { buildNeedsDescription } from './needsLanguage.js'
@@ -7,13 +7,28 @@ import { buildTraitsDescription, flattenTraits } from './traitLanguage.js'
 import { describePlayerSignal } from './playerSignalLanguage.js'
 import { getActionLabel } from '../../data/actions.js'
 
-function recentActionsText(ids) {
+const PLAIN_LANGUAGE_NOTE =
+  'Context is in plain language only — no numbers, no game terms.'
+
+/** Recent action IDs shown in the prompt, by consciousness level (0 → 4, 4+ → 10). */
+const RECENT_ACTIONS_LIMIT_BY_LEVEL = [4, 5, 6, 8, 10, 10]
+
+function recentActionsLimit(consciousnessLevel) {
+  const lv = Math.max(0, Math.min(5, Number(consciousnessLevel) | 0))
+  return RECENT_ACTIONS_LIMIT_BY_LEVEL[lv]
+}
+
+function formatRecentActions(ids, limit) {
   if (!ids || !ids.length) return null
-  const lines = ids.map((id) => {
-    const label = getActionLabel(id) || id
-    return `${label} (${id})`
-  })
-  return `What I have been doing lately: ${lines.join('; ')}.`
+  const slice = ids.slice(-limit)
+  const labels = slice.map((id) => getActionLabel(id) || id)
+  return `What I have been doing: ${labels.join(', ')}`
+}
+
+function formatAvailableActions(availableActions) {
+  const ids = availableActions || []
+  const lines = ids.length ? ids.map((id) => `- ${id}`).join('\n') : '- (none)'
+  return `Available actions (choose one ID exactly):\n${lines}`
 }
 
 /**
@@ -30,21 +45,32 @@ function recentActionsText(ids) {
 export function buildUserPromptContent(raw) {
   const consciousnessLevel = Number(raw.consciousnessLevel) || 0
   const needsDesc = buildNeedsDescription(raw.needs || {}, consciousnessLevel)
-  const traitsDesc =
-    consciousnessLevel >= 1
-      ? buildTraitsDescription(consciousnessLevel, raw.traits || {}, raw.traitTensions ?? null)
-      : null
+  const traitsDesc = buildTraitsDescription(
+    consciousnessLevel,
+    raw.traits || {},
+    raw.traitTensions ?? null
+  )
   const playerBit = describePlayerSignal(raw.playerSignal)
-  const recent = recentActionsText(raw.recentActions)
+  const recent = formatRecentActions(
+    raw.recentActions,
+    recentActionsLimit(consciousnessLevel)
+  )
   const mem = raw.significantMemory && String(raw.significantMemory).trim()
 
-  const parts = [`needs_description: ${needsDesc}`]
-  if (traitsDesc) parts.push(`traits_description: ${traitsDesc}`)
-  parts.push(`available_actions: ${(raw.availableActions || []).join(', ')}`)
+  const parts = [PLAIN_LANGUAGE_NOTE]
 
-  if (playerBit) parts.push(`player_signal: ${playerBit}`)
+  if (consciousnessLevel === 0) {
+    parts.push(needsDesc)
+  } else {
+    parts.push(`How I feel: ${needsDesc}`)
+  }
+
+  if (traitsDesc) parts.push(traitsDesc)
+  if (playerBit) parts.push(playerBit)
+  if (mem) parts.push(mem)
   if (recent) parts.push(recent)
-  if (mem) parts.push(`significant_memory: ${mem}`)
+
+  parts.push(formatAvailableActions(raw.availableActions))
 
   return parts.join('\n\n')
 }

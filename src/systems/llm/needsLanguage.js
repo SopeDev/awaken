@@ -2,7 +2,8 @@
  * Needs → natural language for LLM, scaled by consciousness level.
  *
  * Contract:
- * - Levels 0–1: comma-separated phrases only (no sentence punctuation beyond commas).
+ * - Level 0: only loud needs (thresholds); simplest words; one sentence ("I feel …"); "I feel fine." if none.
+ * - Level 1: comma-separated phrases only (no sentence punctuation beyond commas).
  * - Levels 2–5: short sentences; needs are always all included (all 7 keys).
  * - Bucketing: five ranges over 0–100.
  */
@@ -27,7 +28,48 @@ function band5(value) {
   return 'r0'
 }
 
-// Levels 0–1: minimal, no punctuation other than commas between needs.
+/** Level 0 only: raw felt words; r0/r1 silent for body needs; connection/hygiene silent until r3+. */
+const LEVEL0 = {
+  hunger: { r2: 'a bit hungry', r3: 'hungry', r4: 'really hungry' },
+  thirst: { r2: 'thirsty', r3: 'really thirsty', r4: 'so thirsty' },
+  fatigue: { r2: 'tired', r3: 'really tired', r4: 'exhausted' },
+  boredom: { r2: 'restless', r3: 'bored', r4: 'so bored' },
+  stress: { r2: 'a bit stressed', r3: 'stressed', r4: 'really stressed' },
+  connection_need: { r3: 'lonely', r4: 'really lonely' },
+  hygiene_need: { r3: 'gross', r4: 'really gross' }
+}
+
+const LEVEL0_MAIN_THRESHOLD = 40
+const LEVEL0_CONNECTION_HYGIENE_THRESHOLD = 60
+
+/** e.g. ["a", "b", "c"] → "I feel a, b, and c." */
+function joinLevel0FeelSentence(parts) {
+  if (parts.length === 0) return 'I feel fine.'
+  if (parts.length === 1) return `I feel ${parts[0]}.`
+  if (parts.length === 2) return `I feel ${parts[0]} and ${parts[1]}.`
+  const head = parts.slice(0, -1).join(', ')
+  const last = parts[parts.length - 1]
+  return `I feel ${head}, and ${last}.`
+}
+
+function buildLevel0NeedsDescription(needs) {
+  const n = needs || {}
+  const parts = []
+  for (const key of NEED_KEYS) {
+    const v = Math.max(0, Math.min(100, Number(n[key]) || 0))
+    if (key === 'connection_need' || key === 'hygiene_need') {
+      if (v < LEVEL0_CONNECTION_HYGIENE_THRESHOLD) continue
+    } else {
+      if (v < LEVEL0_MAIN_THRESHOLD) continue
+    }
+    const band = band5(v)
+    const phrase = LEVEL0[key]?.[band]
+    if (phrase) parts.push(phrase)
+  }
+  return joinLevel0FeelSentence(parts)
+}
+
+// Level 1: minimal, no punctuation other than commas between needs.
 const SHORT = {
   hunger: { r0: 'not hungry', r1: 'a bit hungry', r2: 'could snack', r3: 'hungry', r4: 'ravenous' },
   thirst: { r0: 'well hydrated', r1: 'a bit dry', r2: 'thirsty', r3: 'need water soon', r4: 'parched' },
@@ -133,8 +175,12 @@ export function buildNeedsDescription(needs, consciousnessLevel = 5) {
   const level = clampLevel(consciousnessLevel)
   const bands = buildBands(needs || {})
 
+  if (level === 0) {
+    return buildLevel0NeedsDescription(needs || {})
+  }
+
   const shortClauses = NEED_KEYS.map((key) => SHORT[key][bands[key]]).join(', ')
-  if (level <= 1) return shortClauses
+  if (level === 1) return shortClauses
 
   const fatigueBand = bands.fatigue
   const boredomBand = bands.boredom

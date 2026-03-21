@@ -1623,7 +1623,7 @@ const actionEffects = {
   watch_tv:          { boredom: -25, stress: -5,   fatigue: +5,  connection_need: -5 },
   sit_on_bed:        { fatigue: -5,  stress: -5,   boredom: +5 },
   go_to_bathroom:    { stress: -5 },
-  open_computer:     { boredom: -20, stress: +5,   fatigue: +5 },
+  browse_internet:   { boredom: -20, stress: +5,   fatigue: +5 },
   read_book:         { boredom: -15, stress: -8,   fatigue: +8 },
   look_out_window:   { boredom: -20, stress: -10,  connection_need: -5 },
   // future actions
@@ -1931,7 +1931,7 @@ check_phone
 watch_tv
 sit_on_bed
 go_to_bathroom
-open_computer
+browse_internet
 read_book
 look_out_window
 ```

@@ -30,8 +30,8 @@ export const ACTIONS = {
     insightCapable: true,
     loopReinforcing: false,
     repetitionRisk: 'low',
-    habituationRate: 1.0,
-    habituationNeeds: []
+    habituationRate: 0.95,
+    habituationNeeds: ['boredom']
   },
   watch_tv: {
     objectTypeId: 'tv',
@@ -39,17 +39,17 @@ export const ACTIONS = {
     label: 'watch TV',
     loopReinforcing: true,
     repetitionRisk: 'high',
-    habituationRate: 0.72,
+    habituationRate: 0.7,
     habituationNeeds: ['boredom']
   },
-  open_computer: {
+  browse_internet: {
     objectTypeId: 'computer',
     durationMs: 37500,
-    label: 'open the computer',
+    label: 'browse the internet',
     loopReinforcing: true,
     repetitionRisk: 'medium',
     archonTags: ['distraction', 'doubt'],
-    habituationRate: 0.68,
+    habituationRate: 0.7,
     habituationNeeds: ['boredom']
   },
   read_book: {
@@ -68,7 +68,7 @@ export const ACTIONS = {
     loopReinforcing: false,
     repetitionRisk: 'medium',
     archonTags: ['control', 'discipline'],
-    habituationRate: 0.97,
+    habituationRate: 0.95,
     habituationNeeds: ['stress', 'boredom']
   },
   eat_snack: {

@@ -11,6 +11,9 @@ const GAME_MINUTES_PER_REAL_SECOND = 1 / 60
 const TEST_SPEED_MULTIPLIER = 1
 
 const LOG_LLM_DECISION_DEBUG = false
+/** Log system + user messages in the browser when the server includes `_llmDebug` (see `LOG_LLM_IO`). */
+const LOG_LLM_PROMPT_BROWSER =
+  import.meta.env.VITE_LOG_LLM_PROMPT !== 'false'
 const DEBUG_AWARENESS_CHANGES = true
 const DEBUG_AWARENESS_CHANGES_JSON = true
 
@@ -701,7 +704,7 @@ export function getCharacterEngine() {
           traitTensions,
           availableActions: [...AVAILABLE_ACTION_IDS],
           playerSignal,
-          recentActions: this._recentActionIds.slice(-6),
+          recentActions: this._recentActionIds.slice(-10),
           significantMemory
         })
       })
@@ -710,20 +713,28 @@ export function getCharacterEngine() {
       const data = await res.json()
       if (!data || !data.action) throw new Error('missing action in response')
 
-      if (LOG_LLM_DECISION_DEBUG && data._llmDebug) {
+      if (data._llmDebug) {
         const d = data._llmDebug
-        console.log(
-          '%c[llm-decision]%c provider:',
-          'font-weight:bold',
-          '',
-          d.provider,
-          'model:',
-          d.modelId
-        )
-        console.log('[llm-decision] request (game → server)', d.requestBody)
-        console.log('[llm-decision] messages to LLM', d.messages)
-        console.log('[llm-decision] raw JSON from model', d.rawParsed)
-        console.log('[llm-decision] normalized (server → game)', d.normalized)
+        if (LOG_LLM_PROMPT_BROWSER && Array.isArray(d.messages)) {
+          const systemMsg = d.messages.find((m) => m.role === 'system')
+          const userMsg = d.messages.find((m) => m.role === 'user')
+          console.log('%c[llm] → system prompt', 'font-weight:bold', '\n', systemMsg?.content ?? '')
+          console.log('%c[llm] → user message', 'font-weight:bold', '\n', userMsg?.content ?? '')
+        }
+        if (LOG_LLM_DECISION_DEBUG) {
+          console.log(
+            '%c[llm-decision]%c provider:',
+            'font-weight:bold',
+            '',
+            d.provider,
+            'model:',
+            d.modelId
+          )
+          console.log('[llm-decision] request (game → server)', d.requestBody)
+          console.log('[llm-decision] messages to LLM', d.messages)
+          console.log('[llm-decision] raw JSON from model', d.rawParsed)
+          console.log('[llm-decision] normalized (server → game)', d.normalized)
+        }
         delete data._llmDebug
       }
 
@@ -768,7 +779,7 @@ export function getCharacterEngine() {
           if (actionId === 'watch_tv') score += comfort * 0.4
           if (actionId === 'look_out_window') score += curiosity * 0.4 + perception * 0.2
           if (actionId === 'read_book') score += curiosity * 0.45 + (1 - impulsiveness) * 0.15
-          if (actionId === 'open_computer') score += impulsiveness * 0.3
+          if (actionId === 'browse_internet') score += impulsiveness * 0.3
           if (actionId === 'sit_on_couch') score += comfort * 0.2
           if (actionId === 'use_treadmill') score += (1 - comfort) * 0.2
         }

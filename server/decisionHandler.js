@@ -8,6 +8,50 @@ import { getSystemPrompt } from '../src/systems/llm/systemPrompts.js'
 
 const TEMPERATURE = 0.85
 const MAX_TOKENS = 200
+/** gpt-5* / reasoning-style models use hidden reasoning tokens — tiny limits often yield empty JSON. */
+const MAX_COMPLETION_TOKENS_REASONING_MODELS = 4096
+
+/**
+ * Models that require max_completion_tokens (not max_tokens) and often fixed temperature.
+ * Covers gpt-5-nano, gpt-5-mini, o-series, etc.
+ */
+function openAiUsesNewChatParams(modelId) {
+  const m = String(modelId || '').toLowerCase()
+  return (
+    m.includes('gpt-5') ||
+    m.includes('gpt5') ||
+    m.includes('o1') ||
+    m.includes('o3') ||
+    m.includes('o4')
+  )
+}
+
+function openAiCompletionTokenLimit(modelId, env) {
+  if (!openAiUsesNewChatParams(modelId)) return MAX_TOKENS
+  const fromEnv = Number(env?.LLM_MAX_COMPLETION_TOKENS)
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return Math.min(Math.floor(fromEnv), 32000)
+  }
+  return MAX_COMPLETION_TOKENS_REASONING_MODELS
+}
+
+/** Chat message `content` may be a string or an array of { type, text } parts. */
+function extractOpenAiAssistantText(message) {
+  if (!message) return ''
+  const c = message.content
+  if (typeof c === 'string') return c
+  if (Array.isArray(c)) {
+    return c
+      .map((part) => {
+        if (typeof part === 'string') return part
+        if (part && typeof part.text === 'string') return part.text
+        if (part && part.type === 'text' && typeof part.text === 'string') return part.text
+        return ''
+      })
+      .join('')
+  }
+  return ''
+}
 
 function getEnv(options) {
   return options.env || process.env
@@ -67,14 +111,41 @@ async function callOpenAI(messages, env) {
   const model = String(env.LLM_MODEL || 'gpt-4.1-mini').trim()
   const client = new OpenAI({ apiKey })
   try {
-    const completion = await client.chat.completions.create({
+    const useNew = openAiUsesNewChatParams(model)
+    const tokenLimitKey = useNew ? 'max_completion_tokens' : 'max_tokens'
+    const tokenLimit = openAiCompletionTokenLimit(model, env)
+    const request = {
       model,
-      temperature: TEMPERATURE,
-      max_tokens: MAX_TOKENS,
+      [tokenLimitKey]: tokenLimit,
       response_format: { type: 'json_object' },
       messages
-    })
-    const text = completion.choices[0]?.message?.content || '{}'
+    }
+    // gpt-5-mini / gpt-5-nano: only default temperature (1) — omit custom value.
+    if (!useNew) {
+      request.temperature = TEMPERATURE
+    }
+    const completion = await client.chat.completions.create(request)
+    const choice = completion.choices[0]
+    const msg = choice?.message
+    const text = extractOpenAiAssistantText(msg)
+    if (!String(text || '').trim()) {
+      const refusal = msg && typeof msg.refusal === 'string' ? msg.refusal : ''
+      console.warn('[decision] OpenAI returned empty assistant text (no JSON to parse).', {
+        model,
+        finishReason: choice?.finish_reason,
+        usage: completion.usage,
+        refusal: refusal || undefined,
+        messageKeys: msg && typeof msg === 'object' ? Object.keys(msg) : []
+      })
+      return {}
+    }
+    if (choice?.finish_reason === 'length') {
+      console.warn('[decision] OpenAI finish_reason=length (output may be truncated). Consider raising LLM_MAX_COMPLETION_TOKENS.', {
+        model,
+        tokenLimit,
+        usage: completion.usage
+      })
+    }
     return extractJsonObject(text) || {}
   } catch (err) {
     const base = err?.message || String(err)
@@ -127,7 +198,7 @@ export async function handleDecisionRequest(body, options = {}) {
     traitTensions: body.traitTensions ?? null
   })
 
-  const systemPrompt = getSystemPrompt(consciousnessLevel, availableActions)
+  const systemPrompt = getSystemPrompt(consciousnessLevel)
   const messages = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: userContent }
@@ -141,6 +212,11 @@ export async function handleDecisionRequest(body, options = {}) {
     : String(env.LLM_MODEL || 'gpt-4.1-mini').trim()
 
   const logLlmIo = String(env.LOG_LLM_IO || 'true').trim() !== 'false'
+  if (logLlmIo) {
+    console.log('[decision] → LLM system prompt\n', systemPrompt)
+    console.log('[decision] → LLM user message\n', userContent)
+  }
+
   const requestBodyForDebug = {
     consciousnessLevel,
     needs: body.needs,

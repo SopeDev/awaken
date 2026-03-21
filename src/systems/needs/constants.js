@@ -19,7 +19,7 @@ export const NEED_KEYS = [
 export const INITIAL_NEEDS = {
   hunger: 55,
   thirst: 60,
-  fatigue: 20,
+  fatigue: 15,
   boredom: 20,
   stress: 25,
   connection_need: 15,
@@ -50,7 +50,7 @@ export const ACTION_EFFECTS = {
   check_phone: { boredom: -35, stress: 10 },
   watch_tv: { boredom: -25, stress: 10 },
   look_out_window: { boredom: -10, stress: -10, connection_need: -5 },
-  open_computer: { boredom: -35, stress: 10 },
+  browse_internet: { boredom: -35, stress: 10 },
   read_book: { boredom: -15, stress: -10, fatigue: -5 },
   use_treadmill: { stress: -30, fatigue: 20, hunger: 10, thirst: 20, boredom: -10, hygiene_need: 40 },
   eat_snack: { hunger: -40 },

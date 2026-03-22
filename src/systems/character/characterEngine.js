@@ -3,8 +3,51 @@ import { createNeedsState, NEED_KEYS, ACTION_EFFECTS, INITIAL_NEEDS } from '../n
 import { createEntropyState, updateEntropyFromNeeds } from '../entropy/index.js'
 import { exampleChart1, generateTraitSheet, generateTraitSheetDetailed } from '../cosmicBlueprint/index.js'
 import { NEED_LABELS } from '../needs/ui.js'
-import { ACTIONS, AVAILABLE_ACTION_IDS, INTERACTION_DURATION, getActionLabel } from '../../data/actions.js'
+import {
+  ACTIONS,
+  AVAILABLE_ACTION_IDS_ALPHABETICAL,
+  getActionLabel,
+  pickUniformRandomActionId
+} from '../../data/actions.js'
+import { ROOM_OBJECTS } from '../../data/roomData.js'
+import {
+  formatInGameClock,
+  IN_GAME_CLOCK_START_MINUTES,
+  IN_GAME_DAY_MINUTES,
+  REAL_MS_PER_IN_GAME_DAY,
+  RECENT_DECISION_HISTORY_MAX
+} from '../../constants/gameSession.js'
+import {
+  applyDiscoveryUnlocks,
+  findMatchingDiscoveryStep,
+  getRoomDiscoveryChain
+} from '../../data/roomDiscovery.js'
 import { getCharacterState, setConsciousnessLevel } from './characterState.js'
+import {
+  AVATAR_PHASE,
+  DIRECTIONAL_PULL_COOLDOWN_MS,
+  INTUITION_PULSE_COOLDOWN_MS,
+  SYNCHRONICITY_AWARENESS_BASE,
+  SYNCHRONICITY_COOLDOWN_MS,
+  SYNCHRONICITY_NOTICE_BASE_CHANCE,
+  SYNCHRONICITY_NOTICE_BOREDOM_THRESHOLD,
+  SYNCHRONICITY_NOTICE_LEVEL_MIN,
+  SYNCHRONICITY_NOTICE_PERCEPTION_THRESHOLD,
+  SYNCHRONICITY_NOTICE_PRIMED_CHANCE
+} from '../playerSignals/constants.js'
+import {
+  actionIdsForObjectTypes,
+  cardinalDirectionLabel,
+  directionKeyToCardinal,
+  getActionIdsInCardinalSector,
+  getAdjacentObjectTypeIds
+} from '../playerSignals/geometry.js'
+import {
+  buildIntuitionFeltLineForObjectTypes,
+  createEmptyAttunementRecord,
+  objectTypeHasHiddenDepth
+} from '../playerSignals/objectAttunement.js'
+import { getSynchronicityNoteForAction } from '../playerSignals/synchronicityCopy.js'
 
 const GAME_MINUTES_PER_REAL_SECOND = 1 / 60
 // Base multiplier is 1. Game speed is controlled at runtime via Phaser `timeScale`.
@@ -90,6 +133,9 @@ const AVOIDANCE_KEYWORDS = [
   "can't face"
 ]
 
+/** Newest-first log entries: single newline between rows (no rule character). */
+const REASONING_LOG_SEPARATOR = '\n'
+
 const buildClamp = (v, min, max) => Math.max(min, Math.min(max, v))
 const getHabituationCounterKey = (actionId, needKey) => `${actionId}:${needKey}`
 
@@ -136,7 +182,7 @@ function buildLlmReasoningPayload(decision, fallbackReasonText) {
   }
 }
 
-function getPsychologicalFillMultiplier(needs, consciousnessLevel) {
+export function getPsychologicalFillMultiplier(needs, consciousnessLevel) {
   const boredom = Number(needs?.boredom ?? 0)
   const stress = Number(needs?.stress ?? 0)
   const connectionNeed = Number(needs?.connection_need ?? 0)
@@ -202,39 +248,518 @@ export function getCharacterEngine() {
     habituationCounters: {},
     _realSessionStartedAtMs: Date.now(),
 
-    // Latest reasoning text for UI.
-    _reasoningText: 'Waiting for next decision…',
+    _reasoningLog: [],
+    /** Fractional minute-of-day 0–1440, wraps; advances with real time (respects Phaser timeScale). */
+    _gameClockMinutes: IN_GAME_CLOCK_START_MINUTES,
     _lastLLMDecision: null,
 
     // Recent actions for LLM context.
     _recentActionIds: [],
     _suppressAIUntilMs: 0,
 
+    // Player signals + AI scheduler
+    _aiLoopTimer: null,
+    _decisionInFlight: false,
+    _pendingPlayerSignalNote: null,
+    /** Directional pull only: action ids to mark with * in the next LLM user message. */
+    _pendingSalientActionIds: [],
+    _directionalCooldownUntil: 0,
+    _intuitionCooldownUntil: 0,
+    _syncCooldownUntil: 0,
+    /** @type {Record<string, { isAttuned: boolean, attunedAtMs: number|null, synchronicityConsumed: boolean }>} */
+    _objectAttunementByTypeId: {},
+    /** Which discovery chain applies while in Room (future: per-layout id). */
+    _roomDiscoveryChainId: 'tutorial',
+    /** @type {Set<string>|null} actions withheld until discovery unlocks; null = gating off */
+    _roomDiscoveryLockedActions: null,
+    /** @type {Set<string>} one-time synchronicity discovery steps already consumed */
+    _roomDiscoveryConsumedSteps: new Set(),
+
     attachScene(scene) {
       this.scene = scene
       this._aiLoopToken += 1
+      if (scene?.scene?.key === 'Room') {
+        this._ensureRoomDiscoveryState()
+      }
       this._startAIActionLoop(this._aiLoopToken)
+      this._syncAttunementOverlaysToScene()
     },
 
     detachScene() {
+      if (this._aiLoopTimer && this.scene) {
+        this._aiLoopTimer.remove(false)
+      }
+      this._aiLoopTimer = null
       this.scene = null
       this._aiLoopToken += 1
     },
 
-    emitUiStateThrottled() {
+    _scheduleDecisionLoopTick(token, delayMs) {
+      if (!this.scene) return
+      if (this._aiLoopTimer) {
+        this._aiLoopTimer.remove(false)
+        this._aiLoopTimer = null
+      }
+      const d = Math.max(0, delayMs)
+      this._aiLoopTimer = this.scene.time.delayedCall(d, () => {
+        this._aiLoopTimer = null
+        void this._runDecisionTick(token)
+      })
+    },
+
+    requestDecisionSoon(delayMs = 0) {
+      if (!this.scene) return
+      this._scheduleDecisionLoopTick(this._aiLoopToken, delayMs)
+    },
+
+    _snapshotPendingForDecision() {
+      const note = this._pendingPlayerSignalNote
+      this._pendingPlayerSignalNote = null
+      const salientActionIds = [...this._pendingSalientActionIds]
+      this._pendingSalientActionIds = []
+      return { note, salientActionIds }
+    },
+
+    _setPendingPlayerNote(text) {
+      if (!text || typeof text !== 'string') return
+      if (!this.scene) return
+      this._pendingPlayerSignalNote = text.trim()
+    },
+
+    _ensureAttunementRecord(objectTypeId) {
+      const id = String(objectTypeId)
+      if (!this._objectAttunementByTypeId[id]) {
+        this._objectAttunementByTypeId[id] = createEmptyAttunementRecord()
+      }
+      return this._objectAttunementByTypeId[id]
+    },
+
+    _attuneObjectTypesForIntuition(typeIds, nowMs) {
+      const t = Number(nowMs)
+      const ts = Number.isFinite(t) ? t : Date.now()
+      for (const raw of typeIds) {
+        const id = String(raw)
+        const rec = this._ensureAttunementRecord(id)
+        rec.isAttuned = true
+        rec.attunedAtMs = ts
+        rec.synchronicityConsumed = false
+      }
+    },
+
+    _clearAttunementAfterSuccessfulDeepSync(objectTypeId) {
+      const id = String(objectTypeId)
+      const rec = this._objectAttunementByTypeId[id]
+      if (!rec) return
+      rec.isAttuned = false
+      rec.synchronicityConsumed = true
+      this._syncAttunementOverlaysToScene()
+    },
+
+    getAttunedObjectTypeIds() {
+      return Object.entries(this._objectAttunementByTypeId)
+        .filter(([, rec]) => rec && rec.isAttuned)
+        .map(([id]) => id)
+    },
+
+    _syncAttunementOverlaysToScene() {
+      if (this.scene && typeof this.scene.syncAttunementOverlays === 'function') {
+        this.scene.syncAttunementOverlays()
+      }
+    },
+
+    _ensureRoomDiscoveryState() {
+      if (this._roomDiscoveryLockedActions != null) return
+      const chain = getRoomDiscoveryChain(this._roomDiscoveryChainId)
+      this._roomDiscoveryLockedActions = chain
+        ? new Set(chain.initiallyLockedActionIds)
+        : new Set()
+    },
+
+    getAvailableActionIdsForDecision() {
+      const base = [...AVAILABLE_ACTION_IDS_ALPHABETICAL]
+      if (this.scene?.scene?.key !== 'Room' || !this._roomDiscoveryLockedActions) return base
+      return base.filter((id) => !this._roomDiscoveryLockedActions.has(id))
+    },
+
+    isActionAllowedInCurrentRoom(actionId) {
+      if (this.scene?.scene?.key !== 'Room' || !this._roomDiscoveryLockedActions) return true
+      return !this._roomDiscoveryLockedActions.has(String(actionId))
+    },
+
+    _logSignal(payload) {
+      const level = getCharacterState().consciousnessLevel
+      console.log('[signal]', JSON.stringify({
+        ...payload,
+        level
+      }))
+    },
+
+    onPlayerDirectionalPull(room, key) {
+      if (!this.scene || room !== this.scene || !room.player) return
+      const now = this.scene.time.now
+      if (now < this._directionalCooldownUntil) return
+
+      const phase = room.getAvatarActionPhase()
+      if (phase === AVATAR_PHASE.PERFORMING) return
+
+      const cardinal = directionKeyToCardinal(key)
+      if (!cardinal) return
+
+      const px = room.player.x
+      const py = room.player.y
+      const ids = getActionIdsInCardinalSector(cardinal, px, py, room.mapX, room.mapY, ROOM_OBJECTS)
+      this._pendingSalientActionIds = [...ids]
+      const lv = getCharacterState().consciousnessLevel
+      if (lv > 0) {
+        this._setPendingPlayerNote(`I feel a pull toward ${cardinalDirectionLabel(cardinal)}.`)
+      }
+      if (phase === AVATAR_PHASE.WALKING) room.cancelWalkForPlayerSignal()
+      this._directionalCooldownUntil = now + DIRECTIONAL_PULL_COOLDOWN_MS
+      this._logSignal({
+        type: 'directional_pull',
+        phase,
+        direction: key,
+        sectorActionIds: ids,
+        messageInjected: this._pendingPlayerSignalNote
+      })
+      this.emitRoomUiImmediate()
+
+      if (phase === AVATAR_PHASE.WALKING) {
+        this.requestDecisionSoon(0)
+        return
+      }
+      if (phase === AVATAR_PHASE.AWAITING && !this._decisionInFlight) {
+        this.requestDecisionSoon(0)
+      }
+    },
+
+    onPlayerIntuitionPulse(room) {
+      if (!this.scene || room !== this.scene || !room.player) return
+      const now = this.scene.time.now
+      if (now < this._intuitionCooldownUntil) return
+
+      const phase = room.getAvatarActionPhase()
+      const px = room.player.x
+      const py = room.player.y
+      const nearbyTypes = getAdjacentObjectTypeIds(px, py, room.mapX, room.mapY, ROOM_OBJECTS)
+      const actionIds = actionIdsForObjectTypes(nearbyTypes)
+
+      this._intuitionCooldownUntil = now + INTUITION_PULSE_COOLDOWN_MS
+
+      if (!actionIds.length) {
+        this._logSignal({
+          type: 'intuition_pulse',
+          phase,
+          nearbyObjects: [],
+          attunedObjectTypeIds: [],
+          registered: false,
+          messageInjected: null
+        })
+        this.emitRoomUiImmediate()
+        return
+      }
+
+      const deepNearby = nearbyTypes.filter((id) => objectTypeHasHiddenDepth(id))
+      const deepToAttune = deepNearby.filter((id) => {
+        const rec = this._objectAttunementByTypeId[String(id)]
+        return !rec || !rec.isAttuned
+      })
+      const shallowNearby = nearbyTypes.filter((id) => !objectTypeHasHiddenDepth(id))
+
+      if (deepToAttune.length) {
+        this._attuneObjectTypesForIntuition(deepToAttune, now)
+        this._syncAttunementOverlaysToScene()
+      }
+
+      if (shallowNearby.length && typeof room.playIntuitionDismissiveFlicker === 'function') {
+        for (const id of shallowNearby) {
+          room.playIntuitionDismissiveFlicker(id)
+        }
+      }
+
+      let noteText = null
+      if (deepToAttune.length) {
+        noteText = buildIntuitionFeltLineForObjectTypes(deepToAttune)
+        if (noteText) this._setPendingPlayerNote(noteText)
+      }
+
+      this._logSignal({
+        type: 'intuition_pulse',
+        phase,
+        nearbyObjects: nearbyTypes,
+        deepObjectTypeIds: deepNearby,
+        deepIgnoredAlreadyAttuned: deepNearby.filter((id) => !deepToAttune.includes(id)),
+        shallowObjectTypeIds: shallowNearby,
+        newlyAttunedObjectTypeIds: deepToAttune.length ? [...deepToAttune] : [],
+        registered: !!noteText,
+        messageInjected: noteText
+      })
+
+      this.emitRoomUiImmediate()
+
+      if (phase === AVATAR_PHASE.WALKING) {
+        room.cancelWalkForPlayerSignal()
+        this.requestDecisionSoon(0)
+        return
+      }
+
+      if (phase === AVATAR_PHASE.AWAITING && !this._decisionInFlight) {
+        this.requestDecisionSoon(0)
+      }
+    },
+
+    onPlayerSynchronicity(room) {
+      if (!this.scene || room !== this.scene || !room.player) return
+      const now = this.scene.time.now
+      if (now < this._syncCooldownUntil) return
+      if (room.getAvatarActionPhase() !== AVATAR_PHASE.PERFORMING) return
+
+      const actionId = room._interactionActionId
+      if (!actionId) return
+
+      const actionMeta = ACTIONS[actionId] || {}
+      const objectTypeId = actionMeta.objectTypeId
+
+      if (!objectTypeId || !objectTypeHasHiddenDepth(objectTypeId)) {
+        if (typeof room.playSynchronicityBlockedFeedback === 'function') {
+          room.playSynchronicityBlockedFeedback()
+        }
+        this._logSignal({
+          type: 'synchronicity',
+          phase: AVATAR_PHASE.PERFORMING,
+          currentAction: actionId,
+          objectTypeId: objectTypeId ?? null,
+          blocked: true,
+          reason: 'not_hidden_depth',
+          messageInjected: null
+        })
+        this.emitRoomUiImmediate()
+        return
+      }
+
+      const rec = this._objectAttunementByTypeId[String(objectTypeId)]
+      if (!rec || !rec.isAttuned) {
+        if (typeof room.playSynchronicityBlockedFeedback === 'function') {
+          room.playSynchronicityBlockedFeedback()
+        }
+        this._logSignal({
+          type: 'synchronicity',
+          phase: AVATAR_PHASE.PERFORMING,
+          currentAction: actionId,
+          objectTypeId,
+          blocked: true,
+          reason: 'not_attuned',
+          messageInjected: null
+        })
+        this.emitRoomUiImmediate()
+        return
+      }
+
+      this._syncCooldownUntil = now + SYNCHRONICITY_COOLDOWN_MS
+
+      const level = getCharacterState().consciousnessLevel
+      const traits = this.defaultTraits || {}
+      const perception = Number(traits.perception ?? 50)
+      const boredom = Number(this.needsState.getNeeds().boredom ?? 0)
+      const primed =
+        perception > SYNCHRONICITY_NOTICE_PERCEPTION_THRESHOLD ||
+        boredom > SYNCHRONICITY_NOTICE_BOREDOM_THRESHOLD ||
+        level >= SYNCHRONICITY_NOTICE_LEVEL_MIN
+      const noticeP = primed
+        ? SYNCHRONICITY_NOTICE_PRIMED_CHANCE
+        : SYNCHRONICITY_NOTICE_BASE_CHANCE
+      const noticed = Math.random() < noticeP
+
+      if (!noticed) {
+        this._logSignal({
+          type: 'synchronicity',
+          phase: AVATAR_PHASE.PERFORMING,
+          currentAction: actionId,
+          objectTypeId: actionMeta.objectTypeId ?? null,
+          primed,
+          noticeP,
+          noticed: false,
+          messageInjected: null
+        })
+        this.emitRoomUiImmediate()
+        return
+      }
+
+      this.flushNegativePendingDeltasOnSynchronicityInterrupt()
+      if (typeof room.cancelOngoingInteractionForSynchronicity === 'function') {
+        room.cancelOngoingInteractionForSynchronicity()
+      }
+
+      let noteMsg = getSynchronicityNoteForAction(actionId)
+      const discoveryStep = findMatchingDiscoveryStep(
+        this._roomDiscoveryConsumedSteps,
+        objectTypeId,
+        actionId,
+        this._roomDiscoveryChainId
+      )
+      if (discoveryStep) {
+        this._roomDiscoveryConsumedSteps.add(discoveryStep.id)
+        if (this._roomDiscoveryLockedActions) {
+          applyDiscoveryUnlocks(this._roomDiscoveryLockedActions, discoveryStep.unlockActionIds)
+        }
+        noteMsg = discoveryStep.discoveryThought
+      }
+
+      if (objectTypeId) {
+        this._clearAttunementAfterSuccessfulDeepSync(objectTypeId)
+      }
+
+      const lv = level
+      const meterFill = METER_FILL_MULTIPLIER_BY_LEVEL[lv] ?? 1.0
+      const psych = getPsychologicalFillMultiplier(this.needsState.getNeeds(), lv)
+      const delta = SYNCHRONICITY_AWARENESS_BASE * meterFill * psych
+      this.applyAwarenessDelta(delta)
+      console.log('[awareness-signal]', JSON.stringify({
+        label: 'synchronicity_noticed',
+        delta,
+        actionId
+      }))
+
+      if (this.awareness >= AWARENESS_MAX && getCharacterState().consciousnessLevel < 5) {
+        const from = getCharacterState().consciousnessLevel
+        const awarenessAtTrigger = this.awareness
+        this.levelUp()
+        if (DEBUG_AWARENESS_CHANGES) {
+          console.log('[consciousness]', {
+            type: 'levelUp',
+            actionId: 'synchronicity',
+            from,
+            to: getCharacterState().consciousnessLevel,
+            awarenessAtTrigger,
+            resetAwareness: this.awareness
+          })
+        }
+      }
+
+      this._setPendingPlayerNote(noteMsg)
+
+      this._logSignal({
+        type: 'synchronicity',
+        phase: AVATAR_PHASE.PERFORMING,
+        currentAction: actionId,
+        objectTypeId: actionMeta.objectTypeId ?? null,
+        discoveryStepId: discoveryStep ? discoveryStep.id : null,
+        primed,
+        noticeP,
+        noticed: true,
+        interruptedAction: true,
+        messageInjected: noteMsg
+      })
+      this.emitRoomUiImmediate()
+      this.requestDecisionSoon(0)
+    },
+
+    async _runDecisionTick(token) {
+      if (!this.scene || token !== this._aiLoopToken) return
+
+      const AI_DECISION_INTERVAL_MS = 5000 / TEST_SPEED_MULTIPLIER
+
+      if (this._suppressAIUntilMs && this.scene.time.now < this._suppressAIUntilMs) {
+        this._scheduleDecisionLoopTick(token, AI_DECISION_INTERVAL_MS)
+        return
+      }
+
+      if (this.scene.isExecutingAction) {
+        this._scheduleDecisionLoopTick(token, AI_DECISION_INTERVAL_MS)
+        return
+      }
+
+      if (this._decisionInFlight) {
+        this._scheduleDecisionLoopTick(token, 250)
+        return
+      }
+
+      const { note, salientActionIds } = this._snapshotPendingForDecision()
+
+      this._decisionInFlight = true
+      try {
+        let actionId = null
+        try {
+          const allowedActions = this.getAvailableActionIdsForDecision()
+          actionId = await this.chooseNextActionAsync({
+            playerSignal: null,
+            playerSignalNote: note,
+            availableActions: allowedActions,
+            salientActionIds,
+            significantMemory: null
+          })
+        } catch (e) {
+          actionId = pickUniformRandomActionId(this.getAvailableActionIdsForDecision())
+          this.setReasoningFromDecision({
+            action: actionId,
+            thought: '',
+            reason: `Fallback (no LLM): ${getActionLabel(actionId)}`
+          })
+        }
+
+        if (actionId) {
+          this._activeActionDecision = this._lastLLMDecision
+
+          this._recentActionIds.push(actionId)
+          if (this._recentActionIds.length > 20) this._recentActionIds = this._recentActionIds.slice(-20)
+
+          const started = this.scene.executeAction(actionId)
+          if (!started) {
+            this._activeActionDecision = null
+            this._activeActionReasonText = ''
+          }
+        }
+      } finally {
+        this._decisionInFlight = false
+      }
+
+      this._scheduleDecisionLoopTick(token, AI_DECISION_INTERVAL_MS)
+    },
+
+    _emitRoomUiState() {
       if (!this.scene) return
       const now = this.scene.time.now
-      if (now - this._lastUiEmit < 100) return
-      this._lastUiEmit = now
-
       const needs = this.needsState.getNeeds()
+      const avatarPhase =
+        typeof this.scene.getAvatarActionPhase === 'function'
+          ? this.scene.getAvatarActionPhase()
+          : 'awaiting'
+
       EventBus.emit('room-ui-state', {
         needs: { ...needs },
         pendingNeedDeltas: { ...this.pendingNeedDeltas },
         awareness: this.awareness,
         traits: this.defaultTraits ? { ...this.defaultTraits } : {},
-        reasoningText: this._reasoningText || 'Waiting for next decision…'
+        reasoningText: this._reasoningLog.length
+          ? this._reasoningLog.join(REASONING_LOG_SEPARATOR)
+          : 'Waiting for next decision…',
+        avatarPhase,
+        signalCooldownsMs: {
+          directional: Math.max(0, this._directionalCooldownUntil - now),
+          intuition: Math.max(0, this._intuitionCooldownUntil - now),
+          synchronicity: Math.max(0, this._syncCooldownUntil - now)
+        },
+        gameClockDisplay: formatInGameClock(this._gameClockMinutes)
       })
+    },
+
+    emitUiStateThrottled() {
+      if (!this.scene) return
+      const now = this.scene.time.now
+      const anySignalCd =
+        now < this._directionalCooldownUntil ||
+        now < this._intuitionCooldownUntil ||
+        now < this._syncCooldownUntil
+      const minGap = anySignalCd ? 50 : 100
+      if (now - this._lastUiEmit < minGap) return
+      this._lastUiEmit = now
+      this._emitRoomUiState()
+    },
+
+    emitRoomUiImmediate() {
+      if (!this.scene) return
+      this._lastUiEmit = this.scene.time.now
+      this._emitRoomUiState()
     },
 
     getRegressionWindowMs(level) {
@@ -399,6 +924,40 @@ export function getCharacterEngine() {
       }
     },
 
+    /**
+     * Successful synchronicity ends the action early: apply any still-pending need deltas
+     * whose total for this action was negative (relief), and drop the rest (e.g. any
+     * positive deltas like fatigue) without applying. Uses whatever ACTION_EFFECTS the
+     * current action has — same rules for all actions on hasHiddenDepth objects.
+     */
+    flushNegativePendingDeltasOnSynchronicityInterrupt() {
+      const needs = this.needsState.getNeeds()
+      const pending = this.pendingNeedDeltas
+      const totalDeltas = this.pendingNeedTotalDeltas
+
+      if (pending && Object.keys(pending).length > 0) {
+        for (const key of Object.keys(pending)) {
+          if (!NEED_KEYS.includes(key)) continue
+          const total = totalDeltas[key]
+          const remaining = pending[key]
+          if (typeof total !== 'number' || !Number.isFinite(total)) continue
+          if (typeof remaining !== 'number' || !Number.isFinite(remaining) || remaining === 0) continue
+          if (total < 0) {
+            needs[key] = buildClamp(needs[key] + remaining, 0, 100)
+          }
+        }
+      }
+
+      this.pendingNeedDeltas = {}
+      this.pendingNeedTotalDeltas = {}
+      this.pendingNeedChangeTotalMs = null
+      this._activeHabituationCounterKeys = []
+      this._activeHabituationDetails = []
+      this._activeActionNeedsSnapshot = null
+      this._activeActionDecision = null
+      this._activeActionReasonText = ''
+    },
+
     onActionStarted(actionId, durationMs) {
       this.pendingNeedDeltas = {}
       this.pendingNeedTotalDeltas = {}
@@ -516,13 +1075,13 @@ export function getCharacterEngine() {
         addBreakdown(label, adjusted)
       }
 
-      // Repetition penalty.
+      // Repetition penalty (starts on 3rd consecutive same action, not 2nd).
       if (actionId === this._lastCompletedActionId) {
         this._repeatStreakLen += 1
         const streakLen = this._repeatStreakLen
-        if (streakLen >= 2) {
-          const capped = Math.min(streakLen, 5)
-          const penaltyBase = REPETITION_DRAIN_POINTS_BY_STREAK_LEN[capped] || 15
+        if (streakLen >= 3) {
+          const tierKey = Math.min(streakLen - 1, 5)
+          const penaltyBase = REPETITION_DRAIN_POINTS_BY_STREAK_LEN[tierKey] || 15
           const penalty = penaltyBase * repetitionRiskMultiplier
           const delta = -penalty
           awarenessDelta += delta
@@ -685,7 +1244,13 @@ export function getCharacterEngine() {
       this._activeHabituationDetails = []
     },
 
-    async chooseNextActionAsync({ playerSignal = null, significantMemory = null } = {}) {
+    async chooseNextActionAsync({
+      playerSignal = null,
+      playerSignalNote = null,
+      availableActions = null,
+      salientActionIds = null,
+      significantMemory = null
+    } = {}) {
       this._lastLLMDecision = null
 
       let traitTensions = null
@@ -693,6 +1258,18 @@ export function getCharacterEngine() {
         const detail = generateTraitSheetDetailed(this.cosmicChartPlacements)
         traitTensions = detail.tensions
       }
+
+      const actionsList =
+        Array.isArray(availableActions) && availableActions.length
+          ? [...availableActions]
+          : [...AVAILABLE_ACTION_IDS_ALPHABETICAL]
+
+      const allowedSet = new Set(actionsList.map(String))
+      const salientRaw =
+        Array.isArray(salientActionIds) && salientActionIds.length
+          ? [...salientActionIds]
+          : []
+      const salient = salientRaw.filter((id) => allowedSet.has(String(id)))
 
       const res = await fetch('/api/decision', {
         method: 'POST',
@@ -702,8 +1279,10 @@ export function getCharacterEngine() {
           needs: this.needsState.getNeeds(),
           traits: this.defaultTraits,
           traitTensions,
-          availableActions: [...AVAILABLE_ACTION_IDS],
+          availableActions: actionsList,
+          salientActionIds: salient,
           playerSignal,
+          playerSignalNote: playerSignalNote ?? null,
           recentActions: this._recentActionIds.slice(-10),
           significantMemory
         })
@@ -747,137 +1326,37 @@ export function getCharacterEngine() {
       if (!decision) return
       const thought = decision.thought || ''
       const reason = decision.reason || ''
-      const lines = [thought, reason].filter(Boolean)
+      const mainBody = [thought, reason].filter(Boolean).join(' ').trim()
       const extras = ['unease', 'pattern_noticed', 'signal_response', 'guidance', 'state']
         .map((k) => (decision[k] ? `${k}: ${decision[k]}` : null))
         .filter(Boolean)
-      this._reasoningText = [...lines, ...extras].join('\n\n') || '…'
+      const parts = [mainBody, ...extras].filter(Boolean)
+      const body = parts.join(' ').trim() || '…'
+      const clockLabel = formatInGameClock(this._gameClockMinutes)
+      const entryText = `${clockLabel}:  ${body}`
+
+      this._activeActionReasonText = entryText
+      this._reasoningLog.unshift(entryText)
+      if (this._reasoningLog.length > RECENT_DECISION_HISTORY_MAX) {
+        this._reasoningLog.length = RECENT_DECISION_HISTORY_MAX
+      }
     },
 
-    chooseNextActionWeightedRandom() {
-      const needs = this.needsState.getNeeds()
-      const traits = this.defaultTraits
-      const scores = {}
-
-      const t = (key) => (traits && traits[key] != null ? traits[key] : 50) / 100
-      const n = (key) => (needs[key] != null ? needs[key] : 50) / 100
-
-      for (const actionId of AVAILABLE_ACTION_IDS) {
-        let score = 0.1
-        const meta = ACTIONS[actionId] || {}
-
-        if (n('boredom') > 0.5) {
-          const curiosity = t('curiosity')
-          const resilience = t('resilience')
-          const discipline = t('discipline')
-          const courage = t('courage')
-          const desire = t('desire')
-          const impulsiveness = (1 - resilience) * 0.5 + (1 - discipline) * 0.5
-          const comfort = (1 - courage) * 0.6 + desire * 0.4
-          const perception = t('perception')
-          if (actionId === 'check_phone') score += comfort * 0.5 + impulsiveness * 0.3
-          if (actionId === 'watch_tv') score += comfort * 0.4
-          if (actionId === 'look_out_window') score += curiosity * 0.4 + perception * 0.2
-          if (actionId === 'read_book') score += curiosity * 0.45 + (1 - impulsiveness) * 0.15
-          if (actionId === 'browse_internet') score += impulsiveness * 0.3
-          if (actionId === 'sit_on_couch') score += comfort * 0.2
-          if (actionId === 'use_treadmill') score += (1 - comfort) * 0.2
-        }
-
-        if (n('stress') > 0.5) {
-          if (actionId === 'go_back_to_sleep') score += 0.4
-          if (actionId === 'look_out_window') score += 0.35
-          if (actionId === 'use_treadmill' || actionId === 'take_shower') score += 0.3
-          if (actionId === 'read_book') score += 0.32
-          if (actionId === 'sit_on_couch') score += 0.2
-        }
-
-        if (n('fatigue') > 0.65) {
-          if (actionId === 'go_back_to_sleep') score += 0.5
-          if (actionId === 'sit_on_couch') score += 0.25
-        }
-
-        if (n('fatigue') < 0.3 && actionId === 'use_treadmill') score += 0.3
-
-        if (n('hunger') > 0.55 && actionId === 'eat_snack') score += 0.6
-        if (n('thirst') > 0.4 && actionId === 'drink_water') score += 0.5
-
-        if (n('hygiene_need') > 0.5) {
-          if (actionId === 'take_shower') score += 0.55
-          if (actionId === 'use_sink') score += 0.25
-        }
-
-        if (n('stress') > 0.4 && (actionId === 'use_toilet' || actionId === 'use_sink')) score += 0.15
-
-        if (t('curiosity') >= 0.55 && actionId === 'read_book') score += 0.18
-
-        // Critical state biases options.
-        if (this.isCriticalState) {
-          if (meta.insightCapable) score *= 0.01
-          else if (meta.loopReinforcing) score *= 1.6
-          else score *= 0.25
-        }
-
-        scores[actionId] = Math.max(0.01, score)
-      }
-
-      const total = Object.values(scores).reduce((a, b) => a + b, 0)
-      let r = Math.random() * total
-      for (const actionId of AVAILABLE_ACTION_IDS) {
-        r -= scores[actionId]
-        if (r <= 0) return actionId
-      }
-      return AVAILABLE_ACTION_IDS[AVAILABLE_ACTION_IDS.length - 1]
-    },
-
-    _startAIActionLoop(token, { playerSignal = null, significantMemory = null } = {}) {
+    _startAIActionLoop(token) {
       if (!this.scene) return
-
       const AI_DECISION_INTERVAL_MS = 5000 / TEST_SPEED_MULTIPLIER
-      const tryScheduleNext = async () => {
-        if (!this.scene) return
-        if (token !== this._aiLoopToken) return
-        if (this._suppressAIUntilMs && this.scene.time.now < this._suppressAIUntilMs) {
-          this.scene.time.delayedCall(AI_DECISION_INTERVAL_MS, tryScheduleNext)
-          return
-        }
-
-        if (this.scene.isExecutingAction) {
-          this.scene.time.delayedCall(AI_DECISION_INTERVAL_MS, tryScheduleNext)
-          return
-        }
-
-        let actionId = null
-        try {
-          actionId = await this.chooseNextActionAsync({ playerSignal, significantMemory })
-        } catch (e) {
-          actionId = this.chooseNextActionWeightedRandom()
-          this.setReasoningFromDecision({ action: actionId, thought: '', reason: `Fallback: choosing ${getActionLabel(actionId)}` })
-        }
-
-        if (actionId) {
-          this._activeActionDecision = this._lastLLMDecision
-          this._activeActionReasonText = this._reasoningText
-
-          this._recentActionIds.push(actionId)
-          if (this._recentActionIds.length > 20) this._recentActionIds = this._recentActionIds.slice(-20)
-
-          const started = this.scene.executeAction(actionId)
-          if (!started) {
-            this._activeActionDecision = null
-            this._activeActionReasonText = ''
-          }
-        }
-
-        this.scene.time.delayedCall(AI_DECISION_INTERVAL_MS, tryScheduleNext)
-      }
-
-      this.scene.time.delayedCall(AI_DECISION_INTERVAL_MS, tryScheduleNext)
+      this._scheduleDecisionLoopTick(token, AI_DECISION_INTERVAL_MS)
     },
 
     // Called from Room.update().
     update(deltaMs) {
       if (!this.scene) return
+
+      // deltaMs from Room already includes Phaser timeScale (speed / pause).
+      this._gameClockMinutes += (deltaMs / REAL_MS_PER_IN_GAME_DAY) * IN_GAME_DAY_MINUTES
+      this._gameClockMinutes =
+        ((this._gameClockMinutes % IN_GAME_DAY_MINUTES) + IN_GAME_DAY_MINUTES) %
+        IN_GAME_DAY_MINUTES
 
       const gameMinutesDelta = (deltaMs / 1000) * GAME_MINUTES_PER_REAL_SECOND * TEST_SPEED_MULTIPLIER
 

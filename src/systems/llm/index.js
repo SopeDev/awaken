@@ -1,5 +1,5 @@
 export { buildNeedsDescription } from './needsLanguage.js'
 export { buildTraitsDescription, flattenTraits } from './traitLanguage.js'
 export { describePlayerSignal } from './playerSignalLanguage.js'
-export { getSystemPrompt } from './systemPrompts.js'
+export { getDirectionalCueLine, getSystemPrompt } from './systemPrompts.js'
 export { buildUserPromptContent } from './buildUserPrompt.js'

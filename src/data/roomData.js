@@ -27,6 +27,7 @@ export const ROOM_PLACEMENTS = [
   { objectTypeId: 'computer', gridX: 10, gridY: 8 },
   { objectTypeId: 'books', gridX: 8, gridY: 10 },
   { objectTypeId: 'window', gridX: 5, gridY: 0 },
+  { objectTypeId: 'door', gridX: 5, gridY: 10 },
   { objectTypeId: 'refrigerator', gridX: 0, gridY: 1 },
   { objectTypeId: 'couch', gridX: 2, gridY: 4 },
   { objectTypeId: 'water_dispenser', gridX: 0, gridY: 2 },
@@ -48,7 +49,7 @@ export const ROOM_OBJECTS = ROOM_PLACEMENTS.map((p) => {
 })
 
 /** Avatar start: center-bottom of room (in front of bed area). */
-export const AVATAR_START_TILE = { x: 5, y: 9 }
+export const AVATAR_START_TILE = { x: 1, y: 7 }
 
 /**
  * Section borders: block movement except at gap tile (the opening). No door objects.

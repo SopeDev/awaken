@@ -155,12 +155,13 @@ async function callOpenAI(messages, env) {
 
 function normalizeDecision(parsed, availableActions) {
   const safe = parsed && typeof parsed === 'object' ? parsed : {}
-  const action = typeof safe.action === 'string' ? safe.action.trim() : ''
+  const rawAction = typeof safe.action === 'string' ? safe.action.trim() : ''
+  const action = rawAction.replace(/\s*\*+$/, '').trim()
   const valid = new Set(availableActions || [])
   let chosen = action && valid.has(action) ? action : null
   if (!chosen && availableActions?.length) {
-    console.warn('[decision] Invalid or missing action from LLM; falling back to first available.', {
-      received: action,
+    console.warn('[decision] Invalid or missing action from LLM; falling back to first alphabetically.', {
+      received: rawAction,
       available: availableActions
     })
     chosen = availableActions[0]
@@ -185,14 +186,23 @@ function normalizeDecision(parsed, availableActions) {
 export async function handleDecisionRequest(body, options = {}) {
   const env = getEnv(options)
   const consciousnessLevel = Math.max(0, Math.min(5, Number(body.consciousnessLevel) || 0))
-  const availableActions = Array.isArray(body.availableActions) ? body.availableActions.map(String) : []
+  const availableActions = Array.isArray(body.availableActions)
+    ? [...body.availableActions].map(String).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    : []
+
+  const availableSet = new Set(availableActions)
+  const salientActionIds = Array.isArray(body.salientActionIds)
+    ? [...new Set(body.salientActionIds.map(String).filter((id) => availableSet.has(id)))]
+    : []
 
   const userContent = buildUserPromptContent({
     consciousnessLevel,
     needs: body.needs || {},
     traits: body.traits || {},
     availableActions,
+    salientActionIds,
     playerSignal: body.playerSignal ?? null,
+    playerSignalNote: body.playerSignalNote ?? null,
     recentActions: body.recentActions || [],
     significantMemory: consciousnessLevel >= 2 ? (body.significantMemory ?? null) : null,
     traitTensions: body.traitTensions ?? null
@@ -223,7 +233,9 @@ export async function handleDecisionRequest(body, options = {}) {
     traits: body.traits,
     traitTensions: body.traitTensions ?? null,
     availableActions,
+    salientActionIds,
     playerSignal: body.playerSignal ?? null,
+    playerSignalNote: body.playerSignalNote ?? null,
     recentActions: body.recentActions ?? [],
     significantMemory: body.significantMemory ?? null
   }

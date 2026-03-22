@@ -24,5 +24,11 @@ export function PhaserGame({ onSceneReady }) {
     return () => EventBus.off('current-scene-ready', handler)
   }, [onSceneReady])
 
-  return <div ref={containerRef} className="phaser-container" style={{ width: 1280, height: 720 }} />
+  return (
+    <div
+      ref={containerRef}
+      className="phaser-container"
+      style={{ width: '100%', height: '100%', minHeight: 0 }}
+    />
+  )
 }

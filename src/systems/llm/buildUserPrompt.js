@@ -25,10 +25,20 @@ function formatRecentActions(ids, limit) {
   return `What I have been doing: ${labels.join(', ')}`
 }
 
-function formatAvailableActions(availableActions) {
+function formatAvailableActions(availableActions, salientActionIds) {
   const ids = availableActions || []
-  const lines = ids.length ? ids.map((id) => `- ${id}`).join('\n') : '- (none)'
-  return `Available actions (choose one ID exactly):\n${lines}`
+  const salient = new Set(
+    Array.isArray(salientActionIds) ? salientActionIds.map((id) => String(id)) : []
+  )
+  const lines = ids.length
+    ? ids
+        .map((id) => {
+          const s = String(id)
+          return salient.has(s) ? `- ${s} *` : `- ${s}`
+        })
+        .join('\n')
+    : '- (none)'
+  return `Available actions (choose one ID exactly; listed A–Z):\n${lines}`
 }
 
 /**
@@ -38,9 +48,11 @@ function formatAvailableActions(availableActions) {
  * @param {Record<string, number>|object} raw.traits flat or grouped
  * @param {string[]} raw.availableActions
  * @param {string|null} [raw.playerSignal]
+ * @param {string|null} [raw.playerSignalNote] explicit first-person line (takes precedence over playerSignal id)
  * @param {string[]} [raw.recentActions]
  * @param {string|null} [raw.significantMemory]
  * @param {Record<string, number>|null} [raw.traitTensions] optional, from cosmic breakdown
+ * @param {string[]} [raw.salientActionIds] directional-pull targets only; shown as "id *" in the list
  */
 export function buildUserPromptContent(raw) {
   const consciousnessLevel = Number(raw.consciousnessLevel) || 0
@@ -50,7 +62,11 @@ export function buildUserPromptContent(raw) {
     raw.traits || {},
     raw.traitTensions ?? null
   )
-  const playerBit = describePlayerSignal(raw.playerSignal)
+  const explicitNote =
+    raw.playerSignalNote != null && String(raw.playerSignalNote).trim()
+      ? String(raw.playerSignalNote).trim()
+      : null
+  const playerBit = explicitNote || describePlayerSignal(raw.playerSignal)
   const recent = formatRecentActions(
     raw.recentActions,
     recentActionsLimit(consciousnessLevel)
@@ -70,7 +86,9 @@ export function buildUserPromptContent(raw) {
   if (mem) parts.push(mem)
   if (recent) parts.push(recent)
 
-  parts.push(formatAvailableActions(raw.availableActions))
+  parts.push(
+    formatAvailableActions(raw.availableActions, raw.salientActionIds)
+  )
 
   return parts.join('\n\n')
 }

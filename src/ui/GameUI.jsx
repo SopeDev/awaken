@@ -3,15 +3,20 @@ import { EventBus } from '../eventBus.js'
 import { AwarenessStrip } from './AwarenessStrip.jsx'
 import { NeedsPanel } from './NeedsPanel.jsx'
 import { ReasoningPanel } from './ReasoningPanel.jsx'
+import { GameClockPanel } from './GameClockPanel.jsx'
+import { formatInGameClock, IN_GAME_CLOCK_START_MINUTES } from '../constants/gameSession.js'
 import { TraitsModal } from './TraitsModal.jsx'
 import { GAME_WIDTH, GAME_HEIGHT, NEEDS_PANEL_HEIGHT, ENTROPY_STRIP_HEIGHT } from '../constants/uiLayout.js'
+import { AbilityBar } from './AbilityBar/AbilityBar.jsx'
 
 const defaultState = {
   needs: {},
   pendingNeedDeltas: {},
   awareness: 0,
   traits: {},
-  reasoningText: 'Waiting for next decision…'
+  reasoningText: 'Waiting for next decision…',
+  signalCooldownsMs: { directional: 0, intuition: 0, synchronicity: 0 },
+  avatarPhase: 'awaiting'
 }
 
 export function GameUI() {
@@ -27,7 +32,10 @@ export function GameUI() {
         pendingNeedDeltas: payload.pendingNeedDeltas ?? defaultState.pendingNeedDeltas,
         awareness: payload.awareness ?? 0,
         traits: payload.traits ?? defaultState.traits,
-        reasoningText: payload.reasoningText ?? defaultState.reasoningText
+        reasoningText: payload.reasoningText ?? defaultState.reasoningText,
+        gameClockDisplay: payload.gameClockDisplay ?? defaultState.gameClockDisplay,
+        signalCooldownsMs: payload.signalCooldownsMs ?? defaultState.signalCooldownsMs,
+        avatarPhase: payload.avatarPhase ?? defaultState.avatarPhase
       })
     }
     EventBus.on('room-ui-state', handler)
@@ -135,12 +143,14 @@ export function GameUI() {
         onOpenTraits={() => setTraitsModalOpen(true)}
       />
       <ReasoningPanel text={state.reasoningText} />
+      <GameClockPanel display={state.gameClockDisplay} />
+      </div>
+      <AbilityBar signalCooldownsMs={state.signalCooldownsMs} avatarPhase={state.avatarPhase} />
       <TraitsModal
         open={traitsModalOpen}
         traits={state.traits}
         onClose={() => setTraitsModalOpen(false)}
       />
-      </div>
     </>
   )
 }

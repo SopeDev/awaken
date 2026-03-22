@@ -27,19 +27,18 @@ import {
 } from '../data/roomGrid.js'
 import { EventBus } from '../eventBus.js'
 import { getCharacterEngine } from '../systems/character/characterEngine.js'
+import { AVATAR_PHASE } from '../systems/playerSignals/constants.js'
 
 const FLOOR_COLOR = 0x3d3d3d
 const NEEDS_PANEL_HEIGHT = 140
 const ENTROPY_STRIP_HEIGHT = 28
-// Needs use "per game-time minute" drift.
-// Calibration: 30 real minutes ~= 1 in-game day → 1 game minute = 1 real minute.
-// So 1 real second = 1/60 game minutes (needs tick slowly).
-const GAME_MINUTES_PER_REAL_SECOND = 1 / 60
 // Base multiplier is 1. Game speed is controlled at runtime via `this.time.timeScale`.
 const TEST_SPEED_MULTIPLIER = 1
 const WALL_COLOR = 0x2a2a2a
 const OBJECT_COLOR = 0x555555
 const OBJECT_STROKE = 0x888888
+const ATTUNEMENT_FILL = 0x7a88ee
+const ATTUNEMENT_STROKE = 0xb8c4ff
 const LABEL_COLOR = '#cccccc'
 const BORDER_COLOR = 0x666666
 const BORDER_WIDTH = 2
@@ -55,6 +54,7 @@ export class Room extends Phaser.Scene {
 
   create() {
     this.isExecutingAction = false
+    this._interactionFinishTimer = null
     this.isPaused = false
     this.speedMultiplier = 1
     this.time.timeScale = this.speedMultiplier
@@ -83,9 +83,22 @@ export class Room extends Phaser.Scene {
       if (!this.isPaused) this.time.timeScale = this.speedMultiplier
     }
     EventBus.on('set-speed', this._speedHandler)
+
+    this._abilityHandler = (payload) => {
+      if (!payload || !this.characterEngine) return
+      if (payload.type === 'intuition') this.characterEngine.onPlayerIntuitionPulse(this)
+      if (payload.type === 'synchronicity') this.characterEngine.onPlayerSynchronicity(this)
+      if (payload.type === 'directional') this.characterEngine.onPlayerDirectionalPull(this, payload.direction)
+    }
+    EventBus.on('ability-signal', this._abilityHandler)
+
     this.events.on('shutdown', () => {
+      if (this.characterEngine && typeof this.characterEngine.detachScene === 'function') {
+        this.characterEngine.detachScene()
+      }
       if (this._pauseHandler) EventBus.off('toggle-pause', this._pauseHandler)
       if (this._speedHandler) EventBus.off('set-speed', this._speedHandler)
+      if (this._abilityHandler) EventBus.off('ability-signal', this._abilityHandler)
     })
 
     EventBus.emit('current-scene-ready', this)
@@ -103,11 +116,42 @@ export class Room extends Phaser.Scene {
     this.mapX = this.centreX - (this.mapWidth * this.tileSize * 0.5)
     this.mapY = this.centreY - (this.mapHeight * this.tileSize * 0.5)
     this.playerStart = { x: AVATAR_START_TILE.x, y: AVATAR_START_TILE.y }
-    this.gameTimeMinutes = 0
   }
 
   initInput() {
     this.cursors = this.input.keyboard.createCursorKeys()
+    const K = Phaser.Input.Keyboard.KeyCodes
+    this.keyW = this.input.keyboard.addKey(K.W)
+    this.keyA = this.input.keyboard.addKey(K.A)
+    this.keyS = this.input.keyboard.addKey(K.S)
+    this.keyD = this.input.keyboard.addKey(K.D)
+    this.keyE = this.input.keyboard.addKey(K.E)
+    this.keySpace = this.input.keyboard.addKey(K.SPACE)
+  }
+
+  /** @returns {typeof AVATAR_PHASE[keyof typeof AVATAR_PHASE]} */
+  getAvatarActionPhase() {
+    if (!this.isExecutingAction) return AVATAR_PHASE.AWAITING
+    if (this._interactionStartAtMs != null) return AVATAR_PHASE.PERFORMING
+    if (this._actionPath && this._actionPathIndex < this._actionPath.length) return AVATAR_PHASE.WALKING
+    return AVATAR_PHASE.AWAITING
+  }
+
+  /**
+   * Abort pathing only; does not complete an action or run awareness.
+   * @returns {boolean}
+   */
+  cancelWalkForPlayerSignal() {
+    if (this.getAvatarActionPhase() !== AVATAR_PHASE.WALKING) return false
+    this._actionPath = null
+    this._actionPathIndex = 0
+    this._actionPathActionId = null
+    if (this.player) {
+      this.player.target.x = this.player.x
+      this.player.target.y = this.player.y
+    }
+    this.isExecutingAction = false
+    return true
   }
 
   initAnimations() {
@@ -191,11 +235,87 @@ export class Room extends Phaser.Scene {
       const rect = this.add.rectangle(cx, cy, b.width, b.height, OBJECT_COLOR)
         .setStrokeStyle(2, OBJECT_STROKE)
         .setOrigin(0.5)
+        .setDepth(5)
       const label = this.add.text(cx, cy, obj.id, {
         fontSize: 14,
         color: LABEL_COLOR
       }).setOrigin(0.5).setDepth(10)
-      this.objects[obj.id] = { graphic: rect, label }
+      this.objects[obj.id] = {
+        graphic: rect,
+        label,
+        attunementGlow: null,
+        attunementPulseTween: null
+      }
+    }
+  }
+
+  /**
+   * Brief visual feedback when Intuition Pulse finds no hidden depth on this object.
+   * @param {string} objectTypeId
+   */
+  playIntuitionDismissiveFlicker(objectTypeId) {
+    const entry = this.objects[objectTypeId]
+    if (!entry?.graphic) return
+    const rect = entry.graphic
+    rect.setStrokeStyle(4, 0xe8ecff, 1)
+    this.time.delayedCall(110, () => {
+      if (rect && rect.active) rect.setStrokeStyle(2, OBJECT_STROKE, 1)
+    })
+  }
+
+  /**
+   * Persistent glow while the object is intuition-attuned (hidden-depth types only).
+   * @param {string} objectTypeId
+   * @param {boolean} visible
+   */
+  setObjectAttunementGlow(objectTypeId, visible) {
+    const entry = this.objects[objectTypeId]
+    if (!entry?.graphic) return
+
+    if (!visible) {
+      if (entry.attunementPulseTween) {
+        entry.attunementPulseTween.stop()
+        entry.attunementPulseTween = null
+      }
+      if (entry.attunementGlow) {
+        entry.attunementGlow.destroy()
+        entry.attunementGlow = null
+      }
+      return
+    }
+
+    if (entry.attunementGlow && entry.attunementGlow.active) return
+
+    const base = entry.graphic
+    const glow = this.add
+      .rectangle(base.x, base.y, base.width + 10, base.height + 10, ATTUNEMENT_FILL, 0.14)
+      .setStrokeStyle(2, ATTUNEMENT_STROKE, 0.78)
+      .setOrigin(0.5)
+      .setDepth(4)
+    entry.attunementGlow = glow
+    entry.attunementPulseTween = this.tweens.add({
+      targets: glow,
+      alpha: { from: 0.65, to: 1 },
+      duration: 950,
+      yoyo: true,
+      repeat: -1
+    })
+  }
+
+  /** Sync Room overlays with CharacterEngine attunement state. */
+  syncAttunementOverlays() {
+    if (!this.characterEngine || !this.objects) return
+    const attuned = new Set(this.characterEngine.getAttunedObjectTypeIds())
+    for (const id of Object.keys(this.objects)) {
+      this.setObjectAttunementGlow(id, attuned.has(id))
+    }
+  }
+
+  /** Synchronicity used without attunement / on a shallow object — no cooldown consumed. */
+  playSynchronicityBlockedFeedback() {
+    const cam = this.cameras?.main
+    if (cam && typeof cam.flash === 'function') {
+      cam.flash(180, 36, 32, 44, false)
     }
   }
 
@@ -211,12 +331,11 @@ export class Room extends Phaser.Scene {
   update(time, delta) {
     if (this.isPaused) return
     const dtMs = delta * (this.time?.timeScale || 1)
-    const gameMinutesDelta = (dtMs / 1000) * GAME_MINUTES_PER_REAL_SECOND * TEST_SPEED_MULTIPLIER
-    this.gameTimeMinutes += gameMinutesDelta
 
     if (this.characterEngine) {
       this.characterEngine.update(dtMs)
     }
+    this.pollPlayerSignalKeys()
     this.updateActionProgressBar()
 
     if (this.isExecutingAction && this.player) {
@@ -254,8 +373,27 @@ export class Room extends Phaser.Scene {
     this._actionProgressBg.setAlpha(clamped >= 1 ? 0.0 : 1.0)
   }
 
+  pollPlayerSignalKeys() {
+    if (!this.characterEngine || this.isPaused) return
+    const J = Phaser.Input.Keyboard.JustDown
+    if (J(this.keyW)) this.characterEngine.onPlayerDirectionalPull(this, 'w')
+    if (J(this.keyA)) this.characterEngine.onPlayerDirectionalPull(this, 'a')
+    if (J(this.keyS)) this.characterEngine.onPlayerDirectionalPull(this, 's')
+    if (J(this.keyD)) this.characterEngine.onPlayerDirectionalPull(this, 'd')
+    // Mobile / touch-friendly: arrow keys also trigger directional pull.
+    if (this.cursors?.up && J(this.cursors.up)) this.characterEngine.onPlayerDirectionalPull(this, 'w')
+    if (this.cursors?.left && J(this.cursors.left)) this.characterEngine.onPlayerDirectionalPull(this, 'a')
+    if (this.cursors?.down && J(this.cursors.down)) this.characterEngine.onPlayerDirectionalPull(this, 's')
+    if (this.cursors?.right && J(this.cursors.right)) this.characterEngine.onPlayerDirectionalPull(this, 'd')
+    if (J(this.keySpace)) this.characterEngine.onPlayerIntuitionPulse(this)
+    if (J(this.keyE)) this.characterEngine.onPlayerSynchronicity(this)
+  }
+
   executeAction(actionId) {
     if (this.isExecutingAction) return false
+    if (this.characterEngine && !this.characterEngine.isActionAllowedInCurrentRoom(actionId)) {
+      return false
+    }
     const config = ACTIONS[actionId]
     if (!config) return false
     const obj = this.objectsById[config.objectTypeId]
@@ -343,10 +481,45 @@ export class Room extends Phaser.Scene {
     this._actionProgressBg.setAlpha(1)
     this._actionProgressFill && this._actionProgressFill.setAlpha(1)
 
-    this.time.delayedCall(durationMs / TEST_SPEED_MULTIPLIER, () => this.finishAction(actionId))
+    if (this._interactionFinishTimer) {
+      this._interactionFinishTimer.remove(false)
+      this._interactionFinishTimer = null
+    }
+    this._interactionFinishTimer = this.time.delayedCall(
+      durationMs / TEST_SPEED_MULTIPLIER,
+      () => {
+        this._interactionFinishTimer = null
+        this.finishAction(actionId)
+      }
+    )
+  }
+
+  /**
+   * End interaction without onActionCompleted (no habituation / completion bookkeeping).
+   * Used when synchronicity succeeds mid-action.
+   */
+  cancelOngoingInteractionForSynchronicity() {
+    if (this._interactionFinishTimer) {
+      this._interactionFinishTimer.remove(false)
+      this._interactionFinishTimer = null
+    }
+    this._interactionStartAtMs = null
+    this._interactionDurationMs = null
+    this._interactionActionId = null
+    if (this._actionProgressBg) this._actionProgressBg.setAlpha(0)
+    if (this._actionProgressFill) this._actionProgressFill.setAlpha(0)
+    if (this.player) {
+      this.player.clearTint()
+      this.player.setScale(1)
+    }
+    this.isExecutingAction = false
   }
 
   finishAction(actionId) {
+    if (this._interactionFinishTimer) {
+      this._interactionFinishTimer.remove(false)
+      this._interactionFinishTimer = null
+    }
     if (this.characterEngine && this.characterEngine.onActionCompleted) {
       this.characterEngine.onActionCompleted(actionId)
     }
@@ -362,6 +535,10 @@ export class Room extends Phaser.Scene {
     this.player.setScale(1)
     this.isExecutingAction = false
     this.events.emit('actionComplete', { actionId })
+
+    if (actionId === 'go_outside') {
+      this.scene.start('Game')
+    }
   }
 
  

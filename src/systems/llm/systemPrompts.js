@@ -1,7 +1,16 @@
 /**
  * System prompts by consciousness level (0–5).
- * Block 1: personality only. Block 2: JSON schema only. No actions here.
+ * Block 1: personality. Block 2: salience marker meaning. Block 3: JSON schema.
  */
+
+/** One line per level 0–4; level 5 omits this block (direct control). */
+const DIRECTIONAL_CUE_BY_LEVEL = [
+  'Actions marked with * feel slightly more present to you.',
+  'Actions marked with * feel somewhat more present to you.',
+  'Actions marked with * feel noticeably more present to you.',
+  'Actions marked with * feel meaningfully more present to you, like something is pulling you there.',
+  'Actions marked with * feel like clear inner guidance toward something important.'
+]
 
 const PERSONALITY = [
   // 0 — Asleep
@@ -42,7 +51,7 @@ Action is clean, intentional, undivided. You simply are.`
 const SCHEMA = [
   // 0
   `Return a JSON object with these keys:
-- "action": one of the available action IDs
+- "action": one of the available action IDs (do not include the * in your response)
 - "thought": what I am thinking right now, first person, one short sentence
 - "reason": why I chose this, one short sentence
 
@@ -50,7 +59,7 @@ Return ONLY the JSON object. No markdown. No text before or after.`,
 
   // 1
   `Return a JSON object with these keys:
-- "action": one of the available action IDs
+- "action": one of the available action IDs (do not include the * in your response)
 - "thought": what I am thinking right now, first person, one short sentence
 - "reason": why I chose this, one short sentence
 - "unease": (optional) a short phrase — something feels off but I cannot name it.
@@ -60,7 +69,7 @@ Return ONLY the JSON object. No markdown. No text before or after.`,
 
   // 2
   `Return a JSON object with these keys:
-- "action": one of the available action IDs
+- "action": one of the available action IDs (do not include the * in your response)
 - "thought": what I am thinking right now, first person, one short sentence
 - "reason": why I chose this, one short sentence
 - "unease": (optional) something feels off but I cannot name it
@@ -72,7 +81,7 @@ Return ONLY the JSON object. No markdown. No text before or after.`,
 
   // 3
   `Return a JSON object with these keys:
-- "action": one of the available action IDs
+- "action": one of the available action IDs (do not include the * in your response)
 - "thought": what I am thinking right now, first person, one short sentence
 - "reason": why I chose this, one short sentence
 - "unease": (optional) something feels off but I cannot name it
@@ -84,7 +93,7 @@ Return ONLY the JSON object. No markdown. No text before or after.`,
 
   // 4
   `Return a JSON object with these keys:
-- "action": one of the available action IDs
+- "action": one of the available action IDs (do not include the * in your response)
 - "thought": what I am thinking right now, first person, one short sentence
 - "reason": why I chose this, one short sentence
 - "guidance": how my inner guidance shaped this decision. Required when a signal
@@ -95,7 +104,7 @@ Return ONLY the JSON object. No markdown. No text before or after.`,
 
   // 5
   `Return a JSON object with these keys:
-- "action": one of the available action IDs
+- "action": one of the available action IDs (do not include the * in your response)
 - "thought": what I am thinking right now, first person, one short sentence
 - "reason": why I chose this, one short sentence
 - "state": one word describing my current inner condition. Required.
@@ -110,11 +119,25 @@ function clampLevel(level) {
 }
 
 /**
+ * Explains how strongly *-marked actions feel at this consciousness level.
+ * Level 5 returns '' (no extra line; control is direct).
+ * @param {number} consciousnessLevel
+ * @returns {string}
+ */
+export function getDirectionalCueLine(consciousnessLevel) {
+  const lv = clampLevel(consciousnessLevel)
+  if (lv === 5) return ''
+  return DIRECTIONAL_CUE_BY_LEVEL[lv] ?? ''
+}
+
+/**
  * Full system message for the decision LLM. Optional second argument is ignored (backward compatibility).
  * @param {number} consciousnessLevel
  * @param {string[]} [_availableActions] deprecated, unused
  */
 export function getSystemPrompt(consciousnessLevel, _availableActions) {
   const lv = clampLevel(consciousnessLevel)
-  return `${PERSONALITY[lv].trim()}\n\n${SCHEMA[lv].trim()}`
+  const cue = getDirectionalCueLine(lv)
+  const middle = cue ? `${cue}\n\n` : ''
+  return `${PERSONALITY[lv].trim()}\n\n${middle}${SCHEMA[lv].trim()}`
 }

@@ -23,6 +23,15 @@ export const ACTIONS = {
     habituationRate: 0.85,
     habituationNeeds: []
   },
+  go_outside: {
+    objectTypeId: 'door',
+    durationMs: 3500,
+    label: 'go outside',
+    loopReinforcing: false,
+    repetitionRisk: 'low',
+    habituationRate: 1.0,
+    habituationNeeds: []
+  },
   look_out_window: {
     objectTypeId: 'window',
     durationMs: 2500,
@@ -96,6 +105,20 @@ export const ACTIONS = {
 }
 
 export const AVAILABLE_ACTION_IDS = Object.keys(ACTIONS)
+
+/** A–Z for LLM prompts and any non-LLM fallback (not `Object.keys` order). */
+export const AVAILABLE_ACTION_IDS_ALPHABETICAL = [...AVAILABLE_ACTION_IDS].sort((a, b) =>
+  a.localeCompare(b, undefined, { sensitivity: 'base' })
+)
+
+/** When the decision API cannot be used — uniform random, not score-weighted. */
+export function pickUniformRandomActionId(allowedIds) {
+  const list =
+    Array.isArray(allowedIds) && allowedIds.length
+      ? [...allowedIds]
+      : [...AVAILABLE_ACTION_IDS_ALPHABETICAL]
+  return list[Math.floor(Math.random() * list.length)]
+}
 
 /** Duration (ms) to tween avatar to target. */
 export const MOVE_DURATION = 600

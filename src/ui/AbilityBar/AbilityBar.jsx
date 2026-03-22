@@ -1,8 +1,4 @@
 import {
-  GAME_WIDTH,
-  GAME_HEIGHT,
-  NEEDS_PANEL_HEIGHT,
-  ENTROPY_STRIP_HEIGHT,
   ABILITY_BAR_HEIGHT,
   ABILITY_SLOT_SIZE
 } from '../../constants/uiLayout.js'
@@ -14,9 +10,7 @@ import {
 } from '../../systems/playerSignals/constants.js'
 import { EventBus } from '../../eventBus.js'
 
-const BAR_PADDING_BELOW_PX = 16
-const barTop =
-  GAME_HEIGHT - NEEDS_PANEL_HEIGHT - ENTROPY_STRIP_HEIGHT - ABILITY_BAR_HEIGHT - BAR_PADDING_BELOW_PX
+const BAR_PADDING_ABOVE_HUD_PX = 12
 
 function IconDirectional() {
   return (
@@ -207,7 +201,11 @@ function AbilitySlot({
  *   avatarPhase?: string
  * }} props
  */
-export function AbilityBar({ signalCooldownsMs = {}, avatarPhase = AVATAR_PHASE.AWAITING }) {
+export function AbilityBar({
+  signalCooldownsMs = {},
+  avatarPhase = AVATAR_PHASE.AWAITING,
+  hudHeight = 200
+}) {
   const d = Number(signalCooldownsMs.directional) || 0
   const i = Number(signalCooldownsMs.intuition) || 0
   const s = Number(signalCooldownsMs.synchronicity) || 0
@@ -219,19 +217,19 @@ export function AbilityBar({ signalCooldownsMs = {}, avatarPhase = AVATAR_PHASE.
   return (
     <div
       style={{
-        position: 'absolute',
+        position: 'fixed',
         left: 0,
-        top: barTop,
-        width: GAME_WIDTH,
+        right: 0,
+        bottom: hudHeight + BAR_PADDING_ABOVE_HUD_PX,
         height: ABILITY_BAR_HEIGHT,
-        zIndex: 30,
+        zIndex: 45,
         pointerEvents: 'auto',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 10,
         boxSizing: 'border-box',
-        padding: '0 16px',
+        padding: '0 12px',
         background: 'transparent'
       }}
     >

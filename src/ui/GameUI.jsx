@@ -1,13 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { EventBus } from '../eventBus.js'
 import { AwarenessStrip } from './AwarenessStrip.jsx'
 import { NeedsPanel } from './NeedsPanel.jsx'
 import { ReasoningPanel } from './ReasoningPanel.jsx'
 import { GameClockPanel } from './GameClockPanel.jsx'
-import { formatInGameClock, IN_GAME_CLOCK_START_MINUTES } from '../constants/gameSession.js'
 import { TraitsModal } from './TraitsModal.jsx'
-import { GAME_WIDTH, GAME_HEIGHT, NEEDS_PANEL_HEIGHT, ENTROPY_STRIP_HEIGHT } from '../constants/uiLayout.js'
+import {
+  DEFAULT_HUD_CHROME_HEIGHT,
+  NEEDS_PANEL_HEIGHT
+} from '../constants/uiLayout.js'
 import { AbilityBar } from './AbilityBar/AbilityBar.jsx'
+import { usePortrait } from '../hooks/usePortrait.js'
 
 const defaultState = {
   needs: {},
@@ -24,6 +27,9 @@ export function GameUI() {
   const [traitsModalOpen, setTraitsModalOpen] = useState(false)
   const [paused, setPaused] = useState(false)
   const [speed, setSpeed] = useState(1)
+  const [hudHeight, setHudHeight] = useState(DEFAULT_HUD_CHROME_HEIGHT)
+  const portrait = usePortrait()
+  const hudRef = useRef(null)
 
   useEffect(() => {
     const handler = (payload) => {
@@ -42,7 +48,23 @@ export function GameUI() {
     return () => EventBus.off('room-ui-state', handler)
   }, [])
 
-  const panelTop = GAME_HEIGHT - NEEDS_PANEL_HEIGHT - ENTROPY_STRIP_HEIGHT
+  useEffect(() => {
+    const el = hudRef.current
+    if (!el) return
+    const publish = () => {
+      const h = Math.ceil(el.getBoundingClientRect().height)
+      if (h > 0) {
+        setHudHeight(h)
+        EventBus.emit('hud-chrome-height', h)
+      }
+    }
+    const ro = new ResizeObserver(() => {
+      requestAnimationFrame(publish)
+    })
+    ro.observe(el)
+    publish()
+    return () => ro.disconnect()
+  }, [portrait])
 
   const togglePause = () => {
     setPaused((p) => {
@@ -63,10 +85,10 @@ export function GameUI() {
     <>
       <div
         style={{
-          position: 'absolute',
+          position: 'fixed',
           top: 8,
           right: 8,
-          zIndex: 10,
+          zIndex: 50,
           pointerEvents: 'auto',
           display: 'flex',
           flexDirection: 'column',
@@ -80,7 +102,7 @@ export function GameUI() {
           style={{
             cursor: 'pointer',
             padding: '8px 12px',
-            background: 'rgba(20,20,20,0.85)',
+            background: 'rgba(20,20,20,0.9)',
             border: '1px solid #444',
             borderRadius: 6,
             color: '#e8e8e8',
@@ -98,7 +120,7 @@ export function GameUI() {
             style={{
               fontSize: 12,
               padding: '4px 8px',
-              background: 'rgba(20,20,20,0.85)',
+              background: 'rgba(20,20,20,0.9)',
               border: '1px solid #444',
               borderRadius: 6,
               color: '#e8e8e8',
@@ -116,36 +138,65 @@ export function GameUI() {
       </div>
 
       <div
-        className="game-ui-overlay"
+        ref={hudRef}
+        className="game-hud-dock"
         style={{
-          position: 'absolute',
+          position: 'fixed',
           left: 0,
-          top: 0,
-          width: GAME_WIDTH,
-          height: GAME_HEIGHT,
-          pointerEvents: 'none'
+          right: 0,
+          bottom: 0,
+          zIndex: 40,
+          display: 'flex',
+          flexDirection: 'column',
+          maxHeight: portrait ? '58vh' : '42vh',
+          background: 'rgba(18,18,22,0.98)',
+          borderTop: '1px solid #3a3a44',
+          boxSizing: 'border-box',
+          overflow: 'hidden',
+          pointerEvents: 'auto'
         }}
       >
-      <div
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: panelTop,
-          width: GAME_WIDTH,
-          height: ENTROPY_STRIP_HEIGHT + NEEDS_PANEL_HEIGHT,
-          background: 'rgba(26,26,26,0.95)'
-        }}
-      />
-      <AwarenessStrip awareness={state.awareness} />
-      <NeedsPanel
-        needs={state.needs}
-        pendingNeedDeltas={state.pendingNeedDeltas}
-        onOpenTraits={() => setTraitsModalOpen(true)}
-      />
-      <ReasoningPanel text={state.reasoningText} />
-      <GameClockPanel display={state.gameClockDisplay} />
+        <AwarenessStrip awareness={state.awareness} />
+        {portrait ? (
+          <>
+            <NeedsPanel
+              needs={state.needs}
+              pendingNeedDeltas={state.pendingNeedDeltas}
+              onOpenTraits={() => setTraitsModalOpen(true)}
+              portrait
+            />
+            <ReasoningPanel text={state.reasoningText} portrait />
+            <GameClockPanel display={state.gameClockDisplay} portrait />
+          </>
+        ) : (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'stretch',
+              minHeight: NEEDS_PANEL_HEIGHT,
+              flex: 1,
+              minWidth: 0,
+              overflow: 'hidden'
+            }}
+          >
+            <NeedsPanel
+              needs={state.needs}
+              pendingNeedDeltas={state.pendingNeedDeltas}
+              onOpenTraits={() => setTraitsModalOpen(true)}
+              portrait={false}
+            />
+            <ReasoningPanel text={state.reasoningText} portrait={false} />
+            <GameClockPanel display={state.gameClockDisplay} portrait={false} />
+          </div>
+        )}
       </div>
-      <AbilityBar signalCooldownsMs={state.signalCooldownsMs} avatarPhase={state.avatarPhase} />
+
+      <AbilityBar
+        signalCooldownsMs={state.signalCooldownsMs}
+        avatarPhase={state.avatarPhase}
+        hudHeight={hudHeight}
+      />
       <TraitsModal
         open={traitsModalOpen}
         traits={state.traits}

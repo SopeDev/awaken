@@ -26,6 +26,7 @@ import {
   tileToPixel
 } from '../data/roomGrid.js'
 import { EventBus } from '../eventBus.js'
+import { DEFAULT_HUD_CHROME_HEIGHT } from '../constants/uiLayout.js'
 import { getCharacterEngine } from '../systems/character/characterEngine.js'
 import { AVATAR_PHASE } from '../systems/playerSignals/constants.js'
 
@@ -58,6 +59,7 @@ export class Room extends Phaser.Scene {
     this.isPaused = false
     this.speedMultiplier = 1
     this.time.timeScale = this.speedMultiplier
+    this._bottomChromePx = DEFAULT_HUD_CHROME_HEIGHT
     this.initVariables()
     this.objectsById = Object.fromEntries(ROOM_OBJECTS.map(o => [o.id, o]))
     this.initInput()
@@ -92,6 +94,21 @@ export class Room extends Phaser.Scene {
     }
     EventBus.on('ability-signal', this._abilityHandler)
 
+    this._hudChromeHandler = (px) => {
+      if (!this.sys?.isActive()) return
+      if (typeof px === 'number' && px > 40) {
+        this._bottomChromePx = px
+        this.refreshRoomLayout()
+      }
+    }
+    EventBus.on('hud-chrome-height', this._hudChromeHandler)
+
+    this._scaleResizeHandler = () => {
+      if (!this.sys?.isActive()) return
+      this.refreshRoomLayout()
+    }
+    this.scale.on('resize', this._scaleResizeHandler)
+
     this.events.on('shutdown', () => {
       if (this.characterEngine && typeof this.characterEngine.detachScene === 'function') {
         this.characterEngine.detachScene()
@@ -99,6 +116,8 @@ export class Room extends Phaser.Scene {
       if (this._pauseHandler) EventBus.off('toggle-pause', this._pauseHandler)
       if (this._speedHandler) EventBus.off('set-speed', this._speedHandler)
       if (this._abilityHandler) EventBus.off('ability-signal', this._abilityHandler)
+      if (this._hudChromeHandler) EventBus.off('hud-chrome-height', this._hudChromeHandler)
+      if (this._scaleResizeHandler) this.scale.off('resize', this._scaleResizeHandler)
     })
 
     EventBus.emit('current-scene-ready', this)
@@ -111,11 +130,60 @@ export class Room extends Phaser.Scene {
     this.mapWidth = 11
     this.mapHeight = 11
     this.centreX = this.scale.width * 0.5
-    const contentHeight = this.scale.height - NEEDS_PANEL_HEIGHT - ENTROPY_STRIP_HEIGHT
+    const reserve =
+      typeof this._bottomChromePx === 'number' && this._bottomChromePx > 0
+        ? this._bottomChromePx
+        : NEEDS_PANEL_HEIGHT + ENTROPY_STRIP_HEIGHT
+    const contentHeight = Math.max(160, this.scale.height - reserve)
     this.centreY = contentHeight * 0.5
     this.mapX = this.centreX - (this.mapWidth * this.tileSize * 0.5)
     this.mapY = this.centreY - (this.mapHeight * this.tileSize * 0.5)
     this.playerStart = { x: AVATAR_START_TILE.x, y: AVATAR_START_TILE.y }
+  }
+
+  refreshRoomLayout() {
+    if (!this.sys?.isActive()) return
+    const oldMapX = this.mapX
+    const oldMapY = this.mapY
+    let playerTile = null
+    if (this.player) {
+      playerTile = pixelToTile(this.player.x - oldMapX, this.player.y - oldMapY)
+    }
+    this.initVariables()
+    const { width, height } = ROOM_FLOOR
+    const fcx = this.mapX + width / 2
+    const fcy = this.mapY + height / 2
+    if (this._floorFill) this._floorFill.setPosition(fcx, fcy)
+    if (this._floorOutline) this._floorOutline.setPosition(this.mapX, this.mapY)
+    if (this._borderGraphics) {
+      this._borderGraphics.destroy()
+      this._borderGraphics = null
+    }
+    this.drawBorders()
+    if (this.objects) {
+      for (const obj of ROOM_OBJECTS) {
+        const entry = this.objects[obj.id]
+        if (!entry?.graphic) continue
+        const b = getObjectPixelBounds(obj)
+        const cx = this.mapX + b.x + b.width / 2
+        const cy = this.mapY + b.y + b.height / 2
+        entry.graphic.setPosition(cx, cy)
+        if (entry.label) entry.label.setPosition(cx, cy)
+        if (entry.attunementGlow && entry.attunementGlow.active) {
+          entry.attunementGlow.setPosition(cx, cy)
+        }
+      }
+    }
+    if (this.player && playerTile) {
+      const px = tileToPixel(playerTile.tx, playerTile.ty)
+      this.player.setPosition(this.mapX + px.x, this.mapY + px.y)
+      this.player.target.x = this.player.x
+      this.player.target.y = this.player.y
+      const mo = this.getMapOffset()
+      this.player.mapOffset = mo
+      this.player.mapLeft = mo.x - mo.tileSize * 0.5
+      this.player.mapRight = mo.x + mo.width * mo.tileSize - mo.tileSize * 0.5
+    }
   }
 
   initInput() {
@@ -189,13 +257,22 @@ export class Room extends Phaser.Scene {
     const { width, height } = ROOM_FLOOR
     const cx = this.mapX + width / 2
     const cy = this.mapY + height / 2
-    this.add.rectangle(cx, cy, width, height, FLOOR_COLOR).setOrigin(0.5)
-    this.add.rectangle(this.mapX, this.mapY, width, height).setOrigin(0, 0).setStrokeStyle(4, WALL_COLOR).setFillStyle(0x000000, 0)
+    this._floorFill = this.add.rectangle(cx, cy, width, height, FLOOR_COLOR).setOrigin(0.5)
+    this._floorOutline = this.add
+      .rectangle(this.mapX, this.mapY, width, height)
+      .setOrigin(0, 0)
+      .setStrokeStyle(4, WALL_COLOR)
+      .setFillStyle(0x000000, 0)
   }
 
   /** Draw border "fence" tiles as blocked wall cells (single gap remains walkable). */
   drawBorders() {
+    if (this._borderGraphics) {
+      this._borderGraphics.destroy()
+      this._borderGraphics = null
+    }
     const g = this.add.graphics().setDepth(5)
+    this._borderGraphics = g
     const ts = TILE_SIZE
 
     // Visual wall styling (kept distinct so players can read the partitions).

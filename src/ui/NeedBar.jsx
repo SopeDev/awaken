@@ -6,7 +6,7 @@ function hexToCss(hex) {
   return '#' + n.toString(16).padStart(6, '0')
 }
 
-export function NeedBar({ needKey, value = 0, pendingDelta }) {
+export function NeedBar({ needKey, value = 0, pendingDelta, fluid = false }) {
   const label = NEED_LABELS[needKey] || needKey
   const pct = Math.max(0, Math.min(100, value)) / 100
   const color = hexToCss(getNeedFillColor(needKey, value))
@@ -25,12 +25,15 @@ export function NeedBar({ needKey, value = 0, pendingDelta }) {
       )}
       <div
         style={{
-          width: 180,
+          width: fluid ? undefined : 180,
+          flex: fluid ? 1 : undefined,
+          minWidth: fluid ? 80 : undefined,
+          maxWidth: fluid ? 240 : undefined,
           height: 12,
           background: '#2a2a2a',
           borderRadius: 1,
           overflow: 'hidden',
-          flexShrink: 0
+          flexShrink: fluid ? 1 : 0
         }}
       >
         <div

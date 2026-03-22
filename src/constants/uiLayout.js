@@ -1,9 +1,11 @@
 /**
  * Shared UI layout constants for Phaser (content height, etc.) and React overlay.
- * Game canvas is fixed size; React UI overlay matches.
+ * Logical design size (used where fixed pixel math is still handy); game canvas uses RESIZE.
  */
 export const GAME_WIDTH = 1280
 export const GAME_HEIGHT = 720
+/** Fallback until measured HUD height is emitted (awareness + bottom block). */
+export const DEFAULT_HUD_CHROME_HEIGHT = 200
 export const NEEDS_PANEL_HEIGHT = 140
 export const ENTROPY_STRIP_HEIGHT = 28
 /** WoW-style signal row above the awareness strip. */

@@ -1,4 +1,4 @@
-import { GAME_WIDTH, GAME_HEIGHT, ENTROPY_STRIP_HEIGHT, NEEDS_PANEL_HEIGHT } from '../constants/uiLayout.js'
+import { ENTROPY_STRIP_HEIGHT } from '../constants/uiLayout.js'
 
 const PADDING = 18
 const LABEL_WIDTH = 88
@@ -11,21 +11,17 @@ function awarenessColor(value) {
 }
 
 export function AwarenessStrip({ awareness = 0 }) {
-  const stripTop = GAME_HEIGHT - NEEDS_PANEL_HEIGHT - ENTROPY_STRIP_HEIGHT
   const pct = Math.max(0, Math.min(100, awareness)) / 100
 
   return (
     <div
       className="awareness-strip"
       style={{
-        position: 'absolute',
-        left: 0,
-        top: stripTop,
-        width: GAME_WIDTH,
+        width: '100%',
         height: ENTROPY_STRIP_HEIGHT,
+        flexShrink: 0,
         background: 'rgba(26,26,26,0.95)',
-        borderTop: '2px solid #444',
-        borderBottom: '2px solid #444',
+        borderBottom: '1px solid #444',
         display: 'flex',
         alignItems: 'center',
         paddingLeft: PADDING,
@@ -56,4 +52,3 @@ export function AwarenessStrip({ awareness = 0 }) {
     </div>
   )
 }
-

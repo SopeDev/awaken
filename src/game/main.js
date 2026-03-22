@@ -16,8 +16,8 @@ export function createGame(parent) {
     parent,
     backgroundColor: '#2d3436',
     scale: {
-      mode: Phaser.Scale.FIT,
-      autoCenter: Phaser.Scale.CENTER_BOTH
+      mode: Phaser.Scale.RESIZE,
+      autoCenter: Phaser.Scale.NO_CENTER
     },
     physics: {
       default: 'arcade',

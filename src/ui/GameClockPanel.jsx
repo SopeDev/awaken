@@ -1,8 +1,4 @@
-import {
-  NEEDS_PANEL_HEIGHT,
-  REASONING_PANEL_PADDING,
-  getReasoningAndClockLayout
-} from '../constants/uiLayout.js'
+import { NEEDS_PANEL_HEIGHT, REASONING_PANEL_PADDING } from '../constants/uiLayout.js'
 
 const clockFont = "'Share Tech Mono', ui-monospace, 'Cascadia Mono', 'Consolas', monospace"
 
@@ -44,14 +40,15 @@ export function GameClockPanel({ display = '7:00 AM', portrait = false }) {
     )
   }
 
-  const { clockWidth } = getReasoningAndClockLayout()
+  const clockSize = NEEDS_PANEL_HEIGHT
 
   return (
     <div
       style={{
-        width: clockWidth,
-        flexShrink: 0,
-        height: NEEDS_PANEL_HEIGHT,
+        width: clockSize,
+        height: clockSize,
+        flex: '0 0 auto',
+        aspectRatio: '1 / 1',
         background: 'linear-gradient(180deg, #1a1c18 0%, #0d0f0c 100%)',
         borderLeft: '1px solid #444',
         padding: REASONING_PANEL_PADDING,

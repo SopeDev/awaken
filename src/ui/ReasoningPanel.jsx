@@ -41,7 +41,7 @@ export function ReasoningPanel({ text = 'Waiting for next decision…', portrait
   return (
     <div
       style={{
-        flex: 1,
+        flex: '1 1 0',
         minWidth: 0,
         marginLeft: 0,
         height: NEEDS_PANEL_HEIGHT,
@@ -51,7 +51,8 @@ export function ReasoningPanel({ text = 'Waiting for next decision…', portrait
         boxSizing: 'border-box',
         pointerEvents: 'auto',
         display: 'flex',
-        flexDirection: 'column'
+        flexDirection: 'column',
+        overflow: 'hidden'
       }}
     >
       <div style={{ fontSize: 11, color: '#888', marginBottom: 8, flexShrink: 0 }}>Avatar's reasoning</div>

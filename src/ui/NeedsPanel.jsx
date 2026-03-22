@@ -1,6 +1,6 @@
 import { NEED_KEYS } from '../systems/needs/constants.js'
 import { NeedBar } from './NeedBar.jsx'
-import { MENU_WIDTH, REASONING_PANEL_PADDING } from '../constants/uiLayout.js'
+import { MENU_WIDTH } from '../constants/uiLayout.js'
 
 export function NeedsPanel({
   needs = {},
@@ -8,8 +8,6 @@ export function NeedsPanel({
   onOpenTraits,
   portrait = false
 }) {
-  const menuLeft = REASONING_PANEL_PADDING + 8
-
   if (portrait) {
     return (
       <div
@@ -74,13 +72,18 @@ export function NeedsPanel({
   return (
     <div
       style={{
-        width: 300,
-        flexShrink: 0,
+        flex: '1 1 280px',
+        minWidth: 0,
+        maxWidth: 'min(360px, 42vw)',
         minHeight: 120,
-        padding: '8px 12px',
+        padding: '8px 10px',
         borderRight: '1px solid #444',
         boxSizing: 'border-box',
-        position: 'relative',
+        display: 'flex',
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 8,
+        overflow: 'hidden',
         pointerEvents: 'auto'
       }}
     >
@@ -90,17 +93,15 @@ export function NeedsPanel({
         onMouseOver={(e) => (e.currentTarget.style.color = '#e0e0e0')}
         onMouseOut={(e) => (e.currentTarget.style.color = '#b0b0b0')}
         style={{
-          position: 'absolute',
-          left: menuLeft - 8,
-          top: 12,
+          flexShrink: 0,
           width: MENU_WIDTH - 8,
-          height: 72,
+          minHeight: 72,
           margin: 0,
-          padding: '0 0 4px 0',
+          padding: '4px 0',
           border: '1px solid #444',
           background: 'transparent',
           color: '#b0b0b0',
-          fontSize: 28,
+          fontSize: 26,
           cursor: 'pointer',
           lineHeight: 1
         }}
@@ -110,9 +111,8 @@ export function NeedsPanel({
       </button>
       <div
         style={{
-          position: 'absolute',
-          left: menuLeft + MENU_WIDTH,
-          top: 12,
+          flex: 1,
+          minWidth: 0,
           display: 'flex',
           flexDirection: 'column',
           gap: 2
@@ -124,6 +124,7 @@ export function NeedsPanel({
             needKey={key}
             value={needs[key]}
             pendingDelta={pendingNeedDeltas[key]}
+            fluid
           />
         ))}
       </div>

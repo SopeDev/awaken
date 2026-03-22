@@ -14,8 +14,29 @@ export function NeedBar({ needKey, value = 0, pendingDelta, fluid = false }) {
   const showRight = typeof pendingDelta === 'number' && pendingDelta > 0
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', height: 16, gap: 4 }}>
-      <span style={{ fontSize: 12, color: '#b0b0b0', width: 88, flexShrink: 0 }}>{label}</span>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        height: 16,
+        gap: 4,
+        width: fluid ? '100%' : undefined,
+        minWidth: 0
+      }}
+    >
+      <span
+        style={{
+          fontSize: 12,
+          color: '#b0b0b0',
+          width: 88,
+          flexShrink: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap'
+        }}
+      >
+        {label}
+      </span>
       {showLeft ? (
         <span style={{ fontSize: 11, color: '#e8c84a', textShadow: '0 0 4px #e8c84a', width: 18, textAlign: 'right' }}>
           &lt;&lt;
@@ -26,9 +47,9 @@ export function NeedBar({ needKey, value = 0, pendingDelta, fluid = false }) {
       <div
         style={{
           width: fluid ? undefined : 180,
-          flex: fluid ? 1 : undefined,
-          minWidth: fluid ? 80 : undefined,
-          maxWidth: fluid ? 240 : undefined,
+          flex: fluid ? '1 1 0' : undefined,
+          minWidth: fluid ? 0 : undefined,
+          maxWidth: fluid ? undefined : undefined,
           height: 12,
           background: '#2a2a2a',
           borderRadius: 1,

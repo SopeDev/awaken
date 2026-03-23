@@ -34,14 +34,14 @@ export function updateEntropyFromNeeds(needs, currentEntropy, deltaMinutes = 1) 
   const bored = (needs.boredom ?? 0) / 100
   const stress = (needs.stress ?? 0) / 100
   const fatigue = (needs.fatigue ?? 0) / 100
-  const connection = (needs.connection_need ?? 0) / 100
+  const loneliness = (needs.loneliness ?? 0) / 100
   const hunger = (needs.hunger ?? 0) / 100
 
   const deltaPerMinute =
     bored * ENTROPY_PASSIVE_COEFFS.boredom +
     stress * ENTROPY_PASSIVE_COEFFS.stress +
     fatigue * ENTROPY_PASSIVE_COEFFS.fatigue +
-    connection * ENTROPY_PASSIVE_COEFFS.connection_need +
+    loneliness * ENTROPY_PASSIVE_COEFFS.loneliness +
     hunger * ENTROPY_PASSIVE_COEFFS.hunger
 
   return clampEntropy(currentEntropy + deltaPerMinute * deltaMinutes)

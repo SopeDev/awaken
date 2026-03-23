@@ -119,7 +119,7 @@ const REGRESSION_WINDOW_MS_BY_LEVEL = {
 
 const NEED_RESOLUTION_MIN_NEED = 75
 const NEED_RESOLUTION_COOLDOWN_DECISIONS = 5
-const PSYCHOLOGICAL_NEED_KEYS = ['boredom', 'stress', 'connection_need']
+const PSYCHOLOGICAL_NEED_KEYS = ['boredom', 'stress', 'loneliness']
 const AVOIDANCE_KEYWORDS = [
   'avoid',
   'escape',
@@ -132,6 +132,13 @@ const AVOIDANCE_KEYWORDS = [
   'not face',
   "can't face"
 ]
+const NEED_RESULT_HELPED_A_LOT = 'helped_a_lot'
+const NEED_RESULT_HELPED_A_LITTLE = 'helped_a_little'
+const NEED_RESULT_NO_MEANINGFUL_HELP = 'no_meaningful_help'
+const NEED_RESULT_GOT_WORSE = 'got_worse'
+const NEED_RESULT_NOT_APPLICABLE = 'not_applicable'
+const NEED_FAILURE_RESULTS = new Set([NEED_RESULT_NO_MEANINGFUL_HELP, NEED_RESULT_GOT_WORSE])
+const PSYCHOLOGICAL_MISMATCH_NEEDS = new Set(['stress', 'boredom', 'loneliness'])
 
 /** Newest-first log entries: single newline between rows (no rule character). */
 const REASONING_LOG_SEPARATOR = '\n'
@@ -182,10 +189,86 @@ function buildLlmReasoningPayload(decision, fallbackReasonText) {
   }
 }
 
+function getDecisionFactorNeedKey(decision, keyName) {
+  const raw = decision?.decision_factors?.[keyName]
+  if (typeof raw !== 'string') return null
+  const k = raw.trim().toLowerCase()
+  return NEED_KEYS.includes(k) ? k : null
+}
+
+function classifyNeedOutcome(needKey, needsBefore, needsAfter) {
+  if (!needKey || !NEED_KEYS.includes(needKey)) return NEED_RESULT_NOT_APPLICABLE
+  const before = Number(needsBefore?.[needKey])
+  const after = Number(needsAfter?.[needKey])
+  if (!Number.isFinite(before) || !Number.isFinite(after)) return NEED_RESULT_NOT_APPLICABLE
+  const delta = after - before
+  if (delta <= -10) return NEED_RESULT_HELPED_A_LOT
+  if (delta <= -4) return NEED_RESULT_HELPED_A_LITTLE
+  if (delta > 0) return NEED_RESULT_GOT_WORSE
+  if (Math.abs(delta) < 4) return NEED_RESULT_NO_MEANINGFUL_HELP
+  return NEED_RESULT_NO_MEANINGFUL_HELP
+}
+
+function isFailureResult(result) {
+  return NEED_FAILURE_RESULTS.has(result)
+}
+
+function isSuccessResult(result) {
+  return result === NEED_RESULT_HELPED_A_LOT || result === NEED_RESULT_HELPED_A_LITTLE
+}
+
+function isPsychologicalNeed(needKey) {
+  return typeof needKey === 'string' && PSYCHOLOGICAL_MISMATCH_NEEDS.has(needKey)
+}
+
+function makeDeltaText(before, after) {
+  const delta = Number(after) - Number(before)
+  if (!Number.isFinite(delta)) return 'did not really help'
+  if (delta <= -10) return 'helped a lot'
+  if (delta <= -4) return 'helped a little'
+  if (delta > 0) return 'made it worse'
+  return 'did not really help'
+}
+
+function buildFeltOutcomeLine(actionId, primaryNeedKey, secondaryNeedKey, primaryResult, secondaryResult, needsBefore, needsAfter) {
+  const actionLabel = getActionLabel(actionId) || actionId || 'that'
+  const actionText = actionLabel.charAt(0).toUpperCase() + actionLabel.slice(1)
+  const hasPrimaryNeed = !!primaryNeedKey
+  const hasSecondaryNeed = !!secondaryNeedKey
+
+  if (!hasPrimaryNeed && !hasSecondaryNeed) {
+    return `${actionText} did not really help.`
+  }
+
+  if (hasPrimaryNeed && hasSecondaryNeed && primaryNeedKey !== secondaryNeedKey) {
+    const pText = makeDeltaText(needsBefore?.[primaryNeedKey], needsAfter?.[primaryNeedKey])
+    const sText = makeDeltaText(needsBefore?.[secondaryNeedKey], needsAfter?.[secondaryNeedKey])
+    const primaryLabel = NEED_LABELS[primaryNeedKey]?.toLowerCase() || primaryNeedKey
+    const secondaryLabel = NEED_LABELS[secondaryNeedKey]?.toLowerCase() || secondaryNeedKey
+    if (isSuccessResult(primaryResult) && isFailureResult(secondaryResult)) {
+      return `${actionText} ${pText} with ${primaryLabel}. I still feel ${secondaryLabel}.`
+    }
+    if (isFailureResult(primaryResult) && isSuccessResult(secondaryResult)) {
+      return `${actionText} helped ${secondaryLabel}. I still feel ${primaryLabel}.`
+    }
+    if (isFailureResult(primaryResult) && isFailureResult(secondaryResult)) {
+      return `${actionText} did not really help.`
+    }
+    return `${actionText} helped in one way, but not enough.`
+  }
+
+  const needKey = primaryNeedKey || secondaryNeedKey
+  const label = NEED_LABELS[needKey]?.toLowerCase() || needKey
+  const text = makeDeltaText(needsBefore?.[needKey], needsAfter?.[needKey])
+  if (text === 'did not really help') return `${actionText} did not really help.`
+  if (text === 'made it worse') return `${actionText} made ${label} worse.`
+  return `${actionText} ${text} with ${label}.`
+}
+
 export function getPsychologicalFillMultiplier(needs, consciousnessLevel) {
   const boredom = Number(needs?.boredom ?? 0)
   const stress = Number(needs?.stress ?? 0)
-  const connectionNeed = Number(needs?.connection_need ?? 0)
+  const loneliness = Number(needs?.loneliness ?? 0)
 
   let multiplier = 1
   if (boredom > 80 && stress > 80) multiplier = 0
@@ -193,9 +276,9 @@ export function getPsychologicalFillMultiplier(needs, consciousnessLevel) {
   else if (boredom > 65 || stress > 65) multiplier = 0.6
 
   if (consciousnessLevel >= 2) {
-    if (connectionNeed > 90) multiplier *= 0.75
-    else if (connectionNeed > 75) multiplier *= 0.85
-    else if (connectionNeed > 60) multiplier *= 0.95
+    if (loneliness > 90) multiplier *= 0.75
+    else if (loneliness > 75) multiplier *= 0.85
+    else if (loneliness > 60) multiplier *= 0.95
   }
 
   return buildClamp(multiplier, 0, 1)
@@ -242,6 +325,9 @@ export function getCharacterEngine() {
     _activeActionReasonText: '',
     _activeHabituationCounterKeys: [],
     _activeHabituationDetails: [],
+    _activePostActionEvaluation: null,
+    _lastPostActionEvaluation: null,
+    _pendingFeltOutcomeLine: null,
 
     // Snapshot at action start.
     _activeActionNeedsSnapshot: null,
@@ -261,7 +347,7 @@ export function getCharacterEngine() {
     _aiLoopTimer: null,
     _decisionInFlight: false,
     _pendingPlayerSignalNote: null,
-    /** Directional pull only: action ids to mark with * in the next LLM user message. */
+    /** Player-signal cues: action ids to mark with * in the next LLM user message. */
     _pendingSalientActionIds: [],
     _directionalCooldownUntil: 0,
     _intuitionCooldownUntil: 0,
@@ -317,7 +403,9 @@ export function getCharacterEngine() {
       this._pendingPlayerSignalNote = null
       const salientActionIds = [...this._pendingSalientActionIds]
       this._pendingSalientActionIds = []
-      return { note, salientActionIds }
+      const feltOutcomeLine = this._pendingFeltOutcomeLine
+      this._pendingFeltOutcomeLine = null
+      return { note, salientActionIds, feltOutcomeLine }
     },
 
     _setPendingPlayerNote(text) {
@@ -469,6 +557,14 @@ export function getCharacterEngine() {
       if (deepToAttune.length) {
         this._attuneObjectTypesForIntuition(deepToAttune, now)
         this._syncAttunementOverlaysToScene()
+
+        // Mark all actions for attuned objects so the LLM can judge when it followed the cue.
+        const salient = actionIdsForObjectTypes(deepToAttune)
+        if (salient.length) {
+          this._pendingSalientActionIds = [
+            ...new Set([...this._pendingSalientActionIds, ...salient].map(String))
+          ]
+        }
       }
 
       if (shallowNearby.length && typeof room.playIntuitionDismissiveFlicker === 'function') {
@@ -591,6 +687,7 @@ export function getCharacterEngine() {
       }
 
       let noteMsg = getSynchronicityNoteForAction(actionId)
+      let newlyUnlockedActionIds = []
       const discoveryStep = findMatchingDiscoveryStep(
         this._roomDiscoveryConsumedSteps,
         objectTypeId,
@@ -600,6 +697,9 @@ export function getCharacterEngine() {
       if (discoveryStep) {
         this._roomDiscoveryConsumedSteps.add(discoveryStep.id)
         if (this._roomDiscoveryLockedActions) {
+          newlyUnlockedActionIds = discoveryStep.unlockActionIds.filter((id) =>
+            this._roomDiscoveryLockedActions.has(id)
+          )
           applyDiscoveryUnlocks(this._roomDiscoveryLockedActions, discoveryStep.unlockActionIds)
         }
         noteMsg = discoveryStep.discoveryThought
@@ -638,6 +738,13 @@ export function getCharacterEngine() {
 
       this._setPendingPlayerNote(noteMsg)
 
+      // Only star actions when synchronicity unlocked them for the first time.
+      if (newlyUnlockedActionIds.length) {
+        this._pendingSalientActionIds = [
+          ...new Set([...this._pendingSalientActionIds, ...newlyUnlockedActionIds].map(String))
+        ]
+      }
+
       this._logSignal({
         type: 'synchronicity',
         phase: AVATAR_PHASE.PERFORMING,
@@ -674,7 +781,7 @@ export function getCharacterEngine() {
         return
       }
 
-      const { note, salientActionIds } = this._snapshotPendingForDecision()
+      const { note, salientActionIds, feltOutcomeLine } = this._snapshotPendingForDecision()
 
       this._decisionInFlight = true
       try {
@@ -686,7 +793,8 @@ export function getCharacterEngine() {
             playerSignalNote: note,
             availableActions: allowedActions,
             salientActionIds,
-            significantMemory: null
+            significantMemory: null,
+            feltOutcomeLine
           })
         } catch (e) {
           actionId = pickUniformRandomActionId(this.getAvailableActionIdsForDecision())
@@ -998,6 +1106,13 @@ export function getCharacterEngine() {
 
       // Snapshot needs at action start for “need resolution” checks.
       this._activeActionNeedsSnapshot = { ...this.needsState.getNeeds() }
+      const decision = this._activeActionDecision
+      this._activePostActionEvaluation = {
+        actionId,
+        primary: getDecisionFactorNeedKey(decision, 'primary'),
+        secondary: getDecisionFactorNeedKey(decision, 'secondary'),
+        needsBefore: { ...this._activeActionNeedsSnapshot }
+      }
     },
 
     onActionCompleted(actionId) {
@@ -1056,6 +1171,76 @@ export function getCharacterEngine() {
       const needsBefore = this._activeActionNeedsSnapshot
       const needsAfter = this.needsState.getNeeds()
       const psychologicalFillMultiplier = getPsychologicalFillMultiplier(needsAfter, levelAtAction)
+      const evalCtx = this._activePostActionEvaluation
+
+      // Post-action felt-outcome evaluation (primary/secondary only), plus mismatch friction.
+      if (evalCtx && evalCtx.needsBefore && evalCtx.actionId === actionId) {
+        const primaryResult = classifyNeedOutcome(evalCtx.primary, evalCtx.needsBefore, needsAfter)
+        const secondaryResult = classifyNeedOutcome(evalCtx.secondary, evalCtx.needsBefore, needsAfter)
+        const primaryFailed = isFailureResult(primaryResult)
+        const secondaryFailed = isFailureResult(secondaryResult)
+        const primarySucceeded = isSuccessResult(primaryResult)
+
+        const frustrationApplied = {}
+        const addFrustration = (needKey, delta) => {
+          if (!needKey || !NEED_KEYS.includes(needKey)) return
+          const before = Number(needsAfter[needKey] ?? 0)
+          const after = buildClamp(before + delta, 0, 100)
+          const actual = after - before
+          if (actual === 0) return
+          needsAfter[needKey] = after
+          frustrationApplied[needKey] = (frustrationApplied[needKey] || 0) + actual
+        }
+
+        if (primarySucceeded && secondaryFailed) {
+          if (isPsychologicalNeed(evalCtx.secondary)) {
+            addFrustration(evalCtx.secondary, 2)
+          }
+        } else if (primaryFailed && !secondaryFailed) {
+          const target = isPsychologicalNeed(evalCtx.primary) ? evalCtx.primary : 'stress'
+          addFrustration(target, 4)
+        } else if (primaryFailed && secondaryFailed) {
+          const pPsych = isPsychologicalNeed(evalCtx.primary)
+          const sPsych = isPsychologicalNeed(evalCtx.secondary)
+          if (pPsych && sPsych && evalCtx.primary !== evalCtx.secondary) {
+            addFrustration(evalCtx.primary, 4)
+            addFrustration(evalCtx.secondary, 2)
+          } else if (pPsych) {
+            addFrustration(evalCtx.primary, 6)
+          } else if (sPsych) {
+            addFrustration(evalCtx.secondary, 6)
+          } else {
+            addFrustration('stress', 6)
+          }
+        }
+
+        const feltOutcome = buildFeltOutcomeLine(
+          actionId,
+          evalCtx.primary,
+          evalCtx.secondary,
+          primaryResult,
+          secondaryResult,
+          evalCtx.needsBefore,
+          needsAfter
+        )
+
+        const postActionEvaluation = {
+          actionId,
+          primary: evalCtx.primary || 'none',
+          secondary: evalCtx.secondary || 'none',
+          primaryResult,
+          secondaryResult,
+          feltOutcome,
+          frustrationApplied,
+          needsBefore: { ...evalCtx.needsBefore },
+          needsAfter: { ...needsAfter }
+        }
+
+        this._lastPostActionEvaluation = postActionEvaluation
+        this._pendingFeltOutcomeLine = feltOutcome
+      } else {
+        this._lastPostActionEvaluation = null
+      }
 
       let awarenessDelta = 0
       let positiveFillPoints = 0
@@ -1225,6 +1410,7 @@ export function getCharacterEngine() {
           hasAwarenessChange: awarenessAfter !== awarenessBefore,
           psychologicalFillMultiplier,
           breakdown: awarenessBreakdown,
+          postActionEvaluation: this._lastPostActionEvaluation,
           habituation: {
             details: this._activeHabituationDetails,
             counterUpdates: habituationCounterUpdates,
@@ -1242,6 +1428,7 @@ export function getCharacterEngine() {
       this._activeActionDecision = null
       this._activeHabituationCounterKeys = []
       this._activeHabituationDetails = []
+      this._activePostActionEvaluation = null
     },
 
     async chooseNextActionAsync({
@@ -1249,7 +1436,8 @@ export function getCharacterEngine() {
       playerSignalNote = null,
       availableActions = null,
       salientActionIds = null,
-      significantMemory = null
+      significantMemory = null,
+      feltOutcomeLine = null
     } = {}) {
       this._lastLLMDecision = null
 
@@ -1283,6 +1471,7 @@ export function getCharacterEngine() {
           salientActionIds: salient,
           playerSignal,
           playerSignalNote: playerSignalNote ?? null,
+          feltOutcomeLine: feltOutcomeLine ?? null,
           recentActions: this._recentActionIds.slice(-10),
           significantMemory
         })
@@ -1297,7 +1486,7 @@ export function getCharacterEngine() {
         if (LOG_LLM_PROMPT_BROWSER && Array.isArray(d.messages)) {
           const systemMsg = d.messages.find((m) => m.role === 'system')
           const userMsg = d.messages.find((m) => m.role === 'user')
-          console.log('%c[llm] → system prompt', 'font-weight:bold', '\n', systemMsg?.content ?? '')
+          // console.log('%c[llm] → system prompt', 'font-weight:bold', '\n', systemMsg?.content ?? '')
           console.log('%c[llm] → user message', 'font-weight:bold', '\n', userMsg?.content ?? '')
         }
         if (LOG_LLM_DECISION_DEBUG) {
@@ -1317,6 +1506,15 @@ export function getCharacterEngine() {
         delete data._llmDebug
       }
 
+      // Log the decision after we've printed the prompt (if available), so the console ordering matches causality intuition.
+      console.log(
+        '[llm-decision] \n' +
+          'action: ' + JSON.stringify(data.action ?? null, null, 2) + '\n',
+        'thought: ' + JSON.stringify(data.thought ?? null, null, 2) + '\n',
+        'reason: ' + JSON.stringify(data.reason ?? null, null, 2) + '\n',
+        'decision_factors: ' + JSON.stringify(data.decision_factors ?? null, null, 2)
+      )
+
       this._lastLLMDecision = data
       this.setReasoningFromDecision(data)
       return data.action
@@ -1324,8 +1522,9 @@ export function getCharacterEngine() {
 
     setReasoningFromDecision(decision) {
       if (!decision) return
+      const level = getCharacterState().consciousnessLevel
       const thought = decision.thought || ''
-      const reason = decision.reason || ''
+      const reason = level === 0 ? '' : (decision.reason || '')
       const mainBody = [thought, reason].filter(Boolean).join(' ').trim()
       const extras = ['unease', 'pattern_noticed', 'signal_response', 'guidance', 'state']
         .map((k) => (decision[k] ? `${k}: ${decision[k]}` : null))

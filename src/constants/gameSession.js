@@ -6,7 +6,7 @@
 /** Recent action ids + reasoning log both cap at this length. */
 export const RECENT_DECISION_HISTORY_MAX = 20
 
-export const REAL_MS_PER_IN_GAME_DAY = 30 * 60 * 1000
+export const REAL_MS_PER_IN_GAME_DAY = 15 * 60 * 1000
 export const IN_GAME_DAY_MINUTES = 24 * 60
 
 /** Minute-of-day the UI clock shows at session start (7:00 AM). */

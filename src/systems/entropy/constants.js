@@ -19,7 +19,7 @@ export const ENTROPY_PASSIVE_COEFFS = {
   boredom: 0.006,
   stress: 0.006,
   fatigue: 0.003,
-  connection_need: 0.004,
+  loneliness: 0.004,
   hunger: 0.001
 }
 

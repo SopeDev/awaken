@@ -64,7 +64,7 @@ export const TRAIT_SCORE_PHRASES = {
   },
   empathy: {
     d0: 'other people inner lives feel distant — I stay in my own weather',
-    d1: 'attunement is thin — connection stays shallow',
+    d1: 'attunement is thin — loneliness tends to stay unresolved',
     d2: 'I can care, but I guard it — closeness is careful',
     u0: 'I feel the room — moods land on me',
     u1: 'I tune to others without trying — resonance is frequent',

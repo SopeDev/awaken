@@ -40,6 +40,8 @@ const OBJECT_COLOR = 0x555555
 const OBJECT_STROKE = 0x888888
 const ATTUNEMENT_FILL = 0x7a88ee
 const ATTUNEMENT_STROKE = 0xb8c4ff
+const ATTUNEMENT_PULSE_MS = 1000
+const ATTUNEMENT_GLOW_SCALE = 1.12
 const LABEL_COLOR = '#cccccc'
 const BORDER_COLOR = 0x666666
 const BORDER_WIDTH = 2
@@ -361,19 +363,46 @@ export class Room extends Phaser.Scene {
       return
     }
 
-    if (entry.attunementGlow && entry.attunementGlow.active) return
-
     const base = entry.graphic
-    const glow = this.add
-      .rectangle(base.x, base.y, base.width + 10, base.height + 10, ATTUNEMENT_FILL, 0.14)
-      .setStrokeStyle(2, ATTUNEMENT_STROKE, 0.78)
-      .setOrigin(0.5)
-      .setDepth(4)
+    if (entry.attunementGlow && entry.attunementGlow.active) {
+      entry.attunementGlow.setPosition(base.x, base.y)
+      entry.attunementGlow.setDepth((base.depth || 5) + 1)
+      return
+    }
+
+    const spriteLike = base.type === 'Sprite' || base.type === 'Image'
+    let glow = null
+
+    // For sprites/images, clone the artwork and pulse it with additive blending.
+    // This preserves sprite silhouettes and avoids ugly rectangular glows.
+    if (spriteLike && base.texture && base.frame) {
+      glow = this.add.image(base.x, base.y, base.texture.key, base.frame.name)
+        .setOrigin(base.originX ?? 0.5, base.originY ?? 0.5)
+        .setDepth((base.depth || 5) + 1)
+        .setScale(base.scaleX || 1, base.scaleY || 1)
+        .setAlpha(0.5)
+        .setTint(ATTUNEMENT_STROKE)
+        .setBlendMode(Phaser.BlendModes.ADD)
+    } else {
+      const w = base.displayWidth || base.width
+      const h = base.displayHeight || base.height
+      glow = this.add
+        .rectangle(base.x, base.y, w, h, ATTUNEMENT_FILL, 0.34)
+        .setStrokeStyle(2, ATTUNEMENT_STROKE, 1)
+        .setOrigin(0.5)
+        .setDepth((base.depth || 5) + 1)
+        .setScale(1)
+        .setBlendMode(Phaser.BlendModes.ADD)
+    }
+
     entry.attunementGlow = glow
     entry.attunementPulseTween = this.tweens.add({
       targets: glow,
-      alpha: { from: 0.65, to: 1 },
-      duration: 950,
+      scaleX: { from: glow.scaleX || 1, to: (glow.scaleX || 1) * ATTUNEMENT_GLOW_SCALE },
+      scaleY: { from: glow.scaleY || 1, to: (glow.scaleY || 1) * ATTUNEMENT_GLOW_SCALE },
+      alpha: { from: 0.1, to: 0.25 },
+      duration: ATTUNEMENT_PULSE_MS,
+      ease: 'Sine.InOut',
       yoyo: true,
       repeat: -1
     })

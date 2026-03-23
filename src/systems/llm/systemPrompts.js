@@ -5,11 +5,11 @@
 
 /** One line per level 0–4; level 5 omits this block (direct control). */
 const DIRECTIONAL_CUE_BY_LEVEL = [
-  'Actions marked with * feel slightly more present to you.',
-  'Actions marked with * feel somewhat more present to you.',
-  'Actions marked with * feel noticeably more present to you.',
-  'Actions marked with * feel meaningfully more present to you, like something is pulling you there.',
-  'Actions marked with * feel like clear inner guidance toward something important.'
+  'Actions marked with * are the active player-signal target actions for this decision; they feel just barely more present to you.',
+  'Actions marked with * are the active player-signal target actions for this decision; they feel slightly more present to you.',
+  'Actions marked with * are the active player-signal target actions for this decision; they feel somewhat more present to you.',
+  'Actions marked with * are the active player-signal target actions for this decision; they feel noticeably more present to you.',
+  'Actions marked with * are the active player-signal target actions for this decision; they feel like clear inner guidance toward something important.'
 ]
 
 const PERSONALITY = [
@@ -18,13 +18,13 @@ const PERSONALITY = [
 There is no narrator, no self-reflection, no sense of being guided.
 You do not question what you do. You just reach for whatever is in front of you.
 Your thoughts are short and unconsidered. You would never explain why something
-appeals to you — you just feel pulled toward it or not.`,
+appeals to you.`,
 
   // 1 — Curious
   `You are mostly on autopilot, but something unnamed bothers you — a restlessness
 without a story. You do not know anything is guiding you. Odd feelings land as
 mood, not message. You notice basic feelings but do not examine them. You would
-not describe why something appeals to you — you just feel pulled toward it or not.`,
+not describe why something appeals to you.`,
 
   // 2 — Seeking
   `You are beginning to notice repetition — the same loop wearing a groove. You can
@@ -48,12 +48,34 @@ with the pulls you feel, testing them and following them deliberately.`,
 Action is clean, intentional, undivided. You simply are.`
 ]
 
+const SECONDARY_REASONING_RULES = `  - "secondary" is optional in spirit: use "none" by default unless a second motive is genuinely part of the same action.
+  - "secondary" is NOT a filler and NOT just another high need in the queue.
+  - Mental test: "I am doing this mainly because of primary, and also because I think this same action might help with secondary." If this sounds forced, use "none".
+  - Motive families:
+    - bodily maintenance: hunger, thirst, fatigue, dirtiness
+    - psychological/regulatory: boredom, stress, loneliness, comfort, habit, avoidance
+    - orienting/higher-signal: curiosity, player_signal, insight
+    - neutral: none
+  - If primary is bodily, secondary should usually be psychological/regulatory or "none". Avoid bodily+bodily pairings unless truly unavoidable.
+  - Bodily needs can stack, but stacked unmet needs do not automatically belong in one rationale.
+  - "player_signal" and "insight" are valid secondary motives only when genuinely present; keep them uncommon.
+  - Prefer "none" over a fake second reason.`
+
 const SCHEMA = [
   // 0
   `Return a JSON object with these keys:
 - "action": one of the available action IDs (do not include the * in your response)
 - "thought": what I am thinking right now, first person, one short sentence
 - "reason": why I chose this, one short sentence
+- "decision_factors": required object with these keys:
+  - "primary": one of ["hunger","thirst","fatigue","dirtiness","boredom","stress","loneliness","curiosity","comfort","habit","player_signal","insight","avoidance","none"]
+  - "secondary": one of ["hunger","thirst","fatigue","dirtiness","boredom","stress","loneliness","curiosity","comfort","habit","player_signal","insight","avoidance","none"]
+${SECONDARY_REASONING_RULES}
+  - "mode": one of ["need_relief","habit_relief","avoidance","stimulation_seeking","exploration","self_regulation","unconscious_loop","insight_following"]
+  - "player_signal_used": boolean
+  - Set "player_signal_used" to true only if you judge that your chosen action was primarily selected because it felt pulled by the active player-signal target cue (the * marked actions, whose strength is described above). If your choice would still make sense from felt needs alone even if the *-marked pull were ignored, set false.
+  - "repetition_acknowledged": boolean
+  - "confidence": one of ["low","medium","high"]
 
 Return ONLY the JSON object. No markdown. No text before or after.`,
 
@@ -62,6 +84,15 @@ Return ONLY the JSON object. No markdown. No text before or after.`,
 - "action": one of the available action IDs (do not include the * in your response)
 - "thought": what I am thinking right now, first person, one short sentence
 - "reason": why I chose this, one short sentence
+- "decision_factors": required object with these keys:
+  - "primary": one of ["hunger","thirst","fatigue","dirtiness","boredom","stress","loneliness","curiosity","comfort","habit","player_signal","insight","avoidance","none"]
+  - "secondary": one of ["hunger","thirst","fatigue","dirtiness","boredom","stress","loneliness","curiosity","comfort","habit","player_signal","insight","avoidance","none"]
+${SECONDARY_REASONING_RULES}
+  - "mode": one of ["need_relief","habit_relief","avoidance","stimulation_seeking","exploration","self_regulation","unconscious_loop","insight_following"]
+  - "player_signal_used": boolean
+  - Set "player_signal_used" to true only if you judge that your chosen action was primarily selected because it felt pulled by the active player-signal target cue (the * marked actions, whose strength is described above). If your choice would still make sense from felt needs alone even if the *-marked pull were ignored, set false.
+  - "repetition_acknowledged": boolean
+  - "confidence": one of ["low","medium","high"]
 - "unease": (optional) a short phrase — something feels off but I cannot name it.
   Only include this if the feeling is genuinely present. Do not force it.
 
@@ -72,6 +103,15 @@ Return ONLY the JSON object. No markdown. No text before or after.`,
 - "action": one of the available action IDs (do not include the * in your response)
 - "thought": what I am thinking right now, first person, one short sentence
 - "reason": why I chose this, one short sentence
+- "decision_factors": required object with these keys:
+  - "primary": one of ["hunger","thirst","fatigue","dirtiness","boredom","stress","loneliness","curiosity","comfort","habit","player_signal","insight","avoidance","none"]
+  - "secondary": one of ["hunger","thirst","fatigue","dirtiness","boredom","stress","loneliness","curiosity","comfort","habit","player_signal","insight","avoidance","none"]
+${SECONDARY_REASONING_RULES}
+  - "mode": one of ["need_relief","habit_relief","avoidance","stimulation_seeking","exploration","self_regulation","unconscious_loop","insight_following"]
+  - "player_signal_used": boolean
+  - Set "player_signal_used" to true only if you judge that your chosen action was primarily selected because it felt pulled by the active player-signal target cue (the * marked actions, whose strength is described above). If your choice would still make sense from felt needs alone even if the *-marked pull were ignored, set false.
+  - "repetition_acknowledged": boolean
+  - "confidence": one of ["low","medium","high"]
 - "unease": (optional) something feels off but I cannot name it
 - "pattern_noticed": (optional) a pattern I notice in my own behavior, plain language.
   Only include this if there is a real pattern visible in what I have been doing.
@@ -84,6 +124,15 @@ Return ONLY the JSON object. No markdown. No text before or after.`,
 - "action": one of the available action IDs (do not include the * in your response)
 - "thought": what I am thinking right now, first person, one short sentence
 - "reason": why I chose this, one short sentence
+- "decision_factors": required object with these keys:
+  - "primary": one of ["hunger","thirst","fatigue","dirtiness","boredom","stress","loneliness","curiosity","comfort","habit","player_signal","insight","avoidance","none"]
+  - "secondary": one of ["hunger","thirst","fatigue","dirtiness","boredom","stress","loneliness","curiosity","comfort","habit","player_signal","insight","avoidance","none"]
+${SECONDARY_REASONING_RULES}
+  - "mode": one of ["need_relief","habit_relief","avoidance","stimulation_seeking","exploration","self_regulation","unconscious_loop","insight_following"]
+  - "player_signal_used": boolean
+  - Set "player_signal_used" to true only if you judge that your chosen action was primarily selected because it felt pulled by the active player-signal target cue (the * marked actions, whose strength is described above). If your choice would still make sense from felt needs alone even if the *-marked pull were ignored, set false.
+  - "repetition_acknowledged": boolean
+  - "confidence": one of ["low","medium","high"]
 - "unease": (optional) something feels off but I cannot name it
 - "pattern_noticed": (optional) a pattern I notice in my own behavior
 - "signal_response": (optional) how I receive or resist a pull that does not
@@ -96,6 +145,15 @@ Return ONLY the JSON object. No markdown. No text before or after.`,
 - "action": one of the available action IDs (do not include the * in your response)
 - "thought": what I am thinking right now, first person, one short sentence
 - "reason": why I chose this, one short sentence
+- "decision_factors": required object with these keys:
+  - "primary": one of ["hunger","thirst","fatigue","dirtiness","boredom","stress","loneliness","curiosity","comfort","habit","player_signal","insight","avoidance","none"]
+  - "secondary": one of ["hunger","thirst","fatigue","dirtiness","boredom","stress","loneliness","curiosity","comfort","habit","player_signal","insight","avoidance","none"]
+${SECONDARY_REASONING_RULES}
+  - "mode": one of ["need_relief","habit_relief","avoidance","stimulation_seeking","exploration","self_regulation","unconscious_loop","insight_following"]
+  - "player_signal_used": boolean
+  - Set "player_signal_used" to true only if you judge that your chosen action was primarily selected because it felt pulled by the active player-signal target cue (the * marked actions, whose strength is described above). If your choice would still make sense from felt needs alone even if the *-marked pull were ignored, set false.
+  - "repetition_acknowledged": boolean
+  - "confidence": one of ["low","medium","high"]
 - "guidance": how my inner guidance shaped this decision. Required when a signal
   or pull was active. Optional otherwise. Be specific — describe what you followed
   or tested.
@@ -107,6 +165,15 @@ Return ONLY the JSON object. No markdown. No text before or after.`,
 - "action": one of the available action IDs (do not include the * in your response)
 - "thought": what I am thinking right now, first person, one short sentence
 - "reason": why I chose this, one short sentence
+- "decision_factors": required object with these keys:
+  - "primary": one of ["hunger","thirst","fatigue","dirtiness","boredom","stress","loneliness","curiosity","comfort","habit","player_signal","insight","avoidance","none"]
+  - "secondary": one of ["hunger","thirst","fatigue","dirtiness","boredom","stress","loneliness","curiosity","comfort","habit","player_signal","insight","avoidance","none"]
+${SECONDARY_REASONING_RULES}
+  - "mode": one of ["need_relief","habit_relief","avoidance","stimulation_seeking","exploration","self_regulation","unconscious_loop","insight_following"]
+  - "player_signal_used": boolean
+  - Set "player_signal_used" to true only if you judge that your chosen action was primarily selected because it felt pulled by the active player-signal target cue (the * marked actions, whose strength is described above). If your choice would still make sense from felt needs alone even if the *-marked pull were ignored, set false.
+  - "repetition_acknowledged": boolean
+  - "confidence": one of ["low","medium","high"]
 - "state": one word describing my current inner condition. Required.
 
 Return ONLY the JSON object. No markdown. No text before or after.`

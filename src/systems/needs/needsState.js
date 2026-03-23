@@ -14,6 +14,11 @@ function clamp(v) {
   return Math.max(MIN, Math.min(MAX, v))
 }
 
+function stressFromNeedExcess(value, threshold, coefficient, deltaMinutes) {
+  const excess = Math.max(0, (Number(value) || 0) - threshold)
+  return excess * coefficient * deltaMinutes
+}
+
 function updateNeeds(needs, deltaMinutes = 1) {
   const n = { ...needs }
 
@@ -24,29 +29,29 @@ function updateNeeds(needs, deltaMinutes = 1) {
 
   // 2. Cross-influences (directional, stable coefficients)
   // 🍔 Hunger
-  n.stress += n.hunger * 0.05 * deltaMinutes
+  n.stress += stressFromNeedExcess(n.hunger, 60, 0.04, deltaMinutes)
   n.boredom += n.hunger * 0.02 * deltaMinutes
 
   // 💧 Thirst
   n.fatigue += n.thirst * 0.04 * deltaMinutes
-  n.stress += n.thirst * 0.03 * deltaMinutes
+  n.stress += stressFromNeedExcess(n.thirst, 60, 0.05, deltaMinutes)
 
   // 😴 Fatigue
-  n.stress += n.fatigue * 0.06 * deltaMinutes
+  n.stress += stressFromNeedExcess(n.fatigue, 60, 0.05, deltaMinutes)
   n.boredom += n.fatigue * 0.05 * deltaMinutes
 
   // 😐 Boredom
-  n.stress += n.boredom * 0.04 * deltaMinutes
+  n.stress += stressFromNeedExcess(n.boredom, 75, 0.02, deltaMinutes)
 
   // 😰 Stress
   n.fatigue += n.stress * 0.03 * deltaMinutes
 
-  // 🧍 Connection Need
-  n.stress += n.connection_need * 0.04 * deltaMinutes
-  n.boredom += n.connection_need * 0.03 * deltaMinutes
+  // 🧍 Loneliness
+  n.stress += stressFromNeedExcess(n.loneliness, 50, 0.04, deltaMinutes)
+  n.boredom += n.loneliness * 0.03 * deltaMinutes
 
-  // 🚿 Hygiene Need
-  n.stress += n.hygiene_need * 0.03 * deltaMinutes
+  // 🚿 Dirtiness
+  n.stress += stressFromNeedExcess(n.dirtiness, 80, 0.02, deltaMinutes)
 
   // 3. Clamp & stability
   for (const key of NEED_KEYS) {

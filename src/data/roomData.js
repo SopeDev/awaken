@@ -49,7 +49,7 @@ export const ROOM_OBJECTS = ROOM_PLACEMENTS.map((p) => {
 })
 
 /** Avatar start: center-bottom of room (in front of bed area). */
-export const AVATAR_START_TILE = { x: 1, y: 7 }
+export const AVATAR_START_TILE = { x: 2, y: 7 }
 
 /**
  * Section borders: block movement except at gap tile (the opening). No door objects.

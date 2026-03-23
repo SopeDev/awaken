@@ -4,10 +4,10 @@ export const NEED_LABELS = {
   hunger: 'Hunger',
   thirst: 'Thirst',
   fatigue: 'Fatigue',
+  dirtiness: 'Dirtiness',
   boredom: 'Boredom',
   stress: 'Stress',
-  connection_need: 'Connection',
-  hygiene_need: 'Hygiene'
+  loneliness: 'Loneliness'
 }
 
 const GOOD_THRESHOLD = 40

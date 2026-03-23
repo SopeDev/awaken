@@ -14,7 +14,6 @@ const BY_ACTION = {
   go_outside: 'The threshold feels different for a moment — like the air knows I am leaving.',
   go_back_to_sleep: 'A half-dream image flickers and then is gone.',
   drink_water: 'The water tastes different for a second — I cannot say why.',
-  use_toilet: 'A stray thought interrupts the blank moment.',
   use_sink: 'The running water throws a memory I did not ask for.'
 }
 

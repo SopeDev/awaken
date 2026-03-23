@@ -28,7 +28,7 @@ export const CONFLICT_DESCRIPTIONS = {
     mild: 'slight pull toward the new that gets interrupted by preference for the known'
   },
   empathy: {
-    high: 'pulled between deep attunement to others and withdrawal into myself — the connection is real but costly',
+    high: 'pulled between deep attunement to others and withdrawal into myself — relief from loneliness is real but costly',
     mild: 'slight tension between connecting and staying contained'
   },
   expressiveness: {

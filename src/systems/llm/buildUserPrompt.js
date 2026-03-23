@@ -50,6 +50,7 @@ function formatAvailableActions(availableActions, salientActionIds) {
  * @param {string|null} [raw.playerSignal]
  * @param {string|null} [raw.playerSignalNote] explicit first-person line (takes precedence over playerSignal id)
  * @param {string[]} [raw.recentActions]
+ * @param {string|null} [raw.feltOutcomeLine] one-line subjective summary of the previous action result
  * @param {string|null} [raw.significantMemory]
  * @param {Record<string, number>|null} [raw.traitTensions] optional, from cosmic breakdown
  * @param {string[]} [raw.salientActionIds] directional-pull targets only; shown as "id *" in the list
@@ -72,6 +73,10 @@ export function buildUserPromptContent(raw) {
     recentActionsLimit(consciousnessLevel)
   )
   const mem = raw.significantMemory && String(raw.significantMemory).trim()
+  const feltOutcomeLine =
+    raw.feltOutcomeLine != null && String(raw.feltOutcomeLine).trim()
+      ? String(raw.feltOutcomeLine).trim()
+      : null
 
   const parts = [PLAIN_LANGUAGE_NOTE]
 
@@ -83,6 +88,7 @@ export function buildUserPromptContent(raw) {
 
   if (traitsDesc) parts.push(traitsDesc)
   if (playerBit) parts.push(playerBit)
+  if (feltOutcomeLine) parts.push(`What happened when I did that:\n${feltOutcomeLine}`)
   if (mem) parts.push(mem)
   if (recent) parts.push(recent)
 

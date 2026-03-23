@@ -1,7 +1,7 @@
 /** Cooldowns (ms, game time via Phaser scene.time.now). */
 export const DIRECTIONAL_PULL_COOLDOWN_MS = 5000
-export const INTUITION_PULSE_COOLDOWN_MS = 20000
-export const SYNCHRONICITY_COOLDOWN_MS = 40000
+export const INTUITION_PULSE_COOLDOWN_MS = 15000
+export const SYNCHRONICITY_COOLDOWN_MS = 30000
 
 /** Synchronicity awareness fill (before meter + psych multipliers). */
 export const SYNCHRONICITY_AWARENESS_BASE = 4

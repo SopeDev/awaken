@@ -11,7 +11,7 @@ export const ACTIONS = {
     loopReinforcing: true,
     repetitionRisk: 'high',
     habituationRate: 0.70,
-    habituationNeeds: ['boredom']
+    habituationNeeds: ['boredom', 'loneliness']
   },
   go_back_to_sleep: {
     objectTypeId: 'bed',
@@ -20,8 +20,8 @@ export const ACTIONS = {
     loopReinforcing: false,
     repetitionRisk: 'medium',
     avoidancePositive: true,
-    habituationRate: 0.85,
-    habituationNeeds: []
+    habituationRate: 0.90,
+    habituationNeeds: ['fatigue', 'stress']
   },
   go_outside: {
     objectTypeId: 'door',
@@ -39,8 +39,8 @@ export const ACTIONS = {
     insightCapable: true,
     loopReinforcing: false,
     repetitionRisk: 'low',
-    habituationRate: 0.95,
-    habituationNeeds: ['boredom']
+    habituationRate: 0.98,
+    habituationNeeds: ['boredom', 'loneliness']
   },
   watch_tv: {
     objectTypeId: 'tv',
@@ -48,8 +48,8 @@ export const ACTIONS = {
     label: 'watch TV',
     loopReinforcing: true,
     repetitionRisk: 'high',
-    habituationRate: 0.7,
-    habituationNeeds: ['boredom']
+    habituationRate: 0.75,
+    habituationNeeds: ['boredom', 'loneliness']
   },
   browse_internet: {
     objectTypeId: 'computer',
@@ -58,8 +58,8 @@ export const ACTIONS = {
     loopReinforcing: true,
     repetitionRisk: 'medium',
     archonTags: ['distraction', 'doubt'],
-    habituationRate: 0.7,
-    habituationNeeds: ['boredom']
+    habituationRate: 0.70,
+    habituationNeeds: ['boredom', 'loneliness']
   },
   read_book: {
     objectTypeId: 'books',
@@ -95,13 +95,12 @@ export const ACTIONS = {
     label: 'sit on the couch',
     loopReinforcing: false,
     repetitionRisk: 'low',
-    habituationRate: 0.9,
-    habituationNeeds: ['stress']
+    habituationRate: 0.92,
+    habituationNeeds: ['stress', 'fatigue']
   },
   drink_water: { objectTypeId: 'water_dispenser', durationMs: 6250, label: 'get some water', loopReinforcing: false, repetitionRisk: 'low', habituationRate: 1.0, habituationNeeds: [] },
-  take_shower: { objectTypeId: 'shower', durationMs: 15000, label: 'take a shower', loopReinforcing: false, repetitionRisk: 'low', habituationRate: 0.95, habituationNeeds: ['stress'] },
-  use_toilet: { objectTypeId: 'toilet', durationMs: 6250, label: 'use the bathroom', loopReinforcing: false, repetitionRisk: 'low', habituationRate: 1.0, habituationNeeds: [] },
-  use_sink: { objectTypeId: 'sink', durationMs: 10000, label: 'use the sink', loopReinforcing: false, repetitionRisk: 'low', habituationRate: 1.0, habituationNeeds: [] },
+  take_shower: { objectTypeId: 'shower', durationMs: 15000, label: 'take a shower', loopReinforcing: false, repetitionRisk: 'low', habituationRate: 0.96, habituationNeeds: ['stress'] },
+  use_sink: { objectTypeId: 'sink', durationMs: 10000, label: 'use the sink', loopReinforcing: false, repetitionRisk: 'low', habituationRate: 0.98, habituationNeeds: ['stress'] },
 }
 
 export const AVAILABLE_ACTION_IDS = Object.keys(ACTIONS)

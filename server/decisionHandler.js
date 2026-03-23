@@ -5,11 +5,52 @@
 import OpenAI from 'openai'
 import { buildUserPromptContent } from '../src/systems/llm/buildUserPrompt.js'
 import { getSystemPrompt } from '../src/systems/llm/systemPrompts.js'
+import { ACTION_EFFECTS, NEED_KEYS } from '../src/systems/needs/constants.js'
 
 const TEMPERATURE = 0.85
 const MAX_TOKENS = 200
 /** gpt-5* / reasoning-style models use hidden reasoning tokens — tiny limits often yield empty JSON. */
 const MAX_COMPLETION_TOKENS_REASONING_MODELS = 4096
+const DECISION_FACTOR_PRIMARY_SECONDARY_VALUES = new Set([
+  'hunger',
+  'thirst',
+  'fatigue',
+  'boredom',
+  'stress',
+  'loneliness',
+  'dirtiness',
+  'curiosity',
+  'comfort',
+  'habit',
+  'player_signal',
+  'insight',
+  'avoidance',
+  'none'
+])
+const DECISION_FACTOR_MODE_VALUES = new Set([
+  'need_relief',
+  'habit_relief',
+  'avoidance',
+  'stimulation_seeking',
+  'exploration',
+  'self_regulation',
+  'unconscious_loop',
+  'signal_response',
+  'insight_following'
+])
+const DECISION_FACTOR_CONFIDENCE_VALUES = new Set(['low', 'medium', 'high'])
+const DEFAULT_DECISION_FACTORS = {
+  primary: 'none',
+  secondary: 'none',
+  mode: 'unconscious_loop',
+  player_signal_used: false,
+  repetition_acknowledged: false,
+  confidence: 'low'
+}
+const BODILY_REASON_KEYS = new Set(['hunger', 'thirst', 'fatigue', 'dirtiness'])
+const PSYCHOLOGICAL_REASON_KEYS = new Set(['boredom', 'stress', 'loneliness', 'comfort', 'habit', 'avoidance'])
+const HIGHER_SIGNAL_REASON_KEYS = new Set(['curiosity', 'player_signal', 'insight'])
+const NEED_REASON_KEYS = new Set(NEED_KEYS)
 
 /**
  * Models that require max_completion_tokens (not max_tokens) and often fixed temperature.
@@ -153,7 +194,7 @@ async function callOpenAI(messages, env) {
   }
 }
 
-function normalizeDecision(parsed, availableActions) {
+function normalizeDecision(parsed, availableActions, context = {}) {
   const safe = parsed && typeof parsed === 'object' ? parsed : {}
   const rawAction = typeof safe.action === 'string' ? safe.action.trim() : ''
   const action = rawAction.replace(/\s*\*+$/, '').trim()
@@ -169,13 +210,153 @@ function normalizeDecision(parsed, availableActions) {
   const out = {
     action: chosen || '',
     thought: typeof safe.thought === 'string' ? safe.thought : '',
-    reason: typeof safe.reason === 'string' ? safe.reason : ''
+    reason: typeof safe.reason === 'string' ? safe.reason : '',
+    decision_factors: normalizeDecisionFactors(safe.decision_factors, {
+      actionId: chosen || action,
+      needs: context.needs || {}
+    })
   }
   const extraKeys = ['unease', 'pattern_noticed', 'signal_response', 'guidance', 'state']
   for (const k of extraKeys) {
     if (safe[k] != null && safe[k] !== '') out[k] = safe[k]
   }
   return out
+}
+
+function pickEnumString(value, allowedValues, fallback) {
+  if (typeof value !== 'string') return fallback
+  const normalized = value.trim().toLowerCase()
+  if (!normalized || !allowedValues.has(normalized)) return fallback
+  return normalized
+}
+
+function getReasonFamily(reasonKey) {
+  if (BODILY_REASON_KEYS.has(reasonKey)) return 'bodily'
+  if (PSYCHOLOGICAL_REASON_KEYS.has(reasonKey)) return 'psychological'
+  if (HIGHER_SIGNAL_REASON_KEYS.has(reasonKey)) return 'higher_signal'
+  if (reasonKey === 'none') return 'none'
+  return 'other'
+}
+
+function actionDirectlyRelievesNeed(actionId, needKey) {
+  if (!actionId || !needKey || !NEED_REASON_KEYS.has(needKey)) return false
+  const effects = ACTION_EFFECTS[actionId]
+  if (!effects || typeof effects !== 'object') return false
+  const delta = effects[needKey]
+  return typeof delta === 'number' && Number.isFinite(delta) && delta < 0
+}
+
+function normalizeNeedValue(v) {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return 0
+  return Math.max(0, Math.min(100, n))
+}
+
+function sanitizeSecondaryReason(primary, secondary, mode, playerSignalUsed, actionId, needs) {
+  const result = {
+    secondary,
+    sanitized: false,
+    reason: 'kept'
+  }
+  if (!secondary || secondary === 'none') {
+    result.secondary = 'none'
+    result.reason = 'secondary_none_or_missing'
+    return result
+  }
+  if (!primary || primary === 'none') {
+    result.secondary = 'none'
+    result.sanitized = true
+    result.reason = 'primary_none_secondary_removed'
+    return result
+  }
+  if (secondary === primary) {
+    result.secondary = 'none'
+    result.sanitized = true
+    result.reason = 'secondary_same_as_primary'
+    return result
+  }
+
+  const primaryFamily = getReasonFamily(primary)
+  const secondaryFamily = getReasonFamily(secondary)
+  const actionHelpsSecondaryDirectly = actionDirectlyRelievesNeed(actionId, secondary)
+  const secondaryNeedValue = normalizeNeedValue(needs?.[secondary])
+
+  if (primaryFamily === 'bodily' && secondaryFamily === 'bodily') {
+    result.secondary = 'none'
+    result.sanitized = true
+    result.reason = 'bodily_primary_with_bodily_secondary_disallowed'
+    return result
+  }
+
+  if (secondaryFamily === 'higher_signal') {
+    const validSignalContext = playerSignalUsed || mode === 'signal_response' || mode === 'insight_following'
+    if (!validSignalContext) {
+      result.secondary = 'none'
+      result.sanitized = true
+      result.reason = 'higher_signal_secondary_without_signal_context'
+      return result
+    }
+  }
+
+  if (
+    secondaryFamily === 'bodily' &&
+    !actionHelpsSecondaryDirectly &&
+    (primaryFamily === 'bodily' || primaryFamily === 'psychological')
+  ) {
+    result.secondary = 'none'
+    result.sanitized = true
+    result.reason = 'secondary_bodily_not_helped_by_action'
+    return result
+  }
+
+  if (secondaryFamily === 'bodily' && secondaryNeedValue >= 60 && !actionHelpsSecondaryDirectly) {
+    result.secondary = 'none'
+    result.sanitized = true
+    result.reason = 'secondary_looks_like_pending_unmet_need'
+    return result
+  }
+
+  return result
+}
+
+function normalizeDecisionFactors(rawFactors, context = {}) {
+  const safe = rawFactors && typeof rawFactors === 'object' ? rawFactors : {}
+  const primary = pickEnumString(
+      safe.primary,
+      DECISION_FACTOR_PRIMARY_SECONDARY_VALUES,
+      DEFAULT_DECISION_FACTORS.primary
+    )
+  const secondaryRaw = pickEnumString(
+    safe.secondary,
+    DECISION_FACTOR_PRIMARY_SECONDARY_VALUES,
+    DEFAULT_DECISION_FACTORS.secondary
+  )
+  const mode = pickEnumString(safe.mode, DECISION_FACTOR_MODE_VALUES, DEFAULT_DECISION_FACTORS.mode)
+  const playerSignalUsed =
+    typeof safe.player_signal_used === 'boolean'
+      ? safe.player_signal_used
+      : DEFAULT_DECISION_FACTORS.player_signal_used
+  const sanitizedSecondary = sanitizeSecondaryReason(
+    primary,
+    secondaryRaw,
+    mode,
+    playerSignalUsed,
+    context.actionId,
+    context.needs
+  )
+  return {
+    primary,
+    secondary: sanitizedSecondary.secondary,
+    mode,
+    player_signal_used: playerSignalUsed,
+    repetition_acknowledged:
+      typeof safe.repetition_acknowledged === 'boolean'
+        ? safe.repetition_acknowledged
+        : DEFAULT_DECISION_FACTORS.repetition_acknowledged,
+    confidence: pickEnumString(safe.confidence, DECISION_FACTOR_CONFIDENCE_VALUES, DEFAULT_DECISION_FACTORS.confidence),
+    secondary_sanitized: sanitizedSecondary.sanitized,
+    secondary_sanitization_reason: sanitizedSecondary.reason
+  }
 }
 
 /**
@@ -203,6 +384,7 @@ export async function handleDecisionRequest(body, options = {}) {
     salientActionIds,
     playerSignal: body.playerSignal ?? null,
     playerSignalNote: body.playerSignalNote ?? null,
+    feltOutcomeLine: body.feltOutcomeLine ?? null,
     recentActions: body.recentActions || [],
     significantMemory: consciousnessLevel >= 2 ? (body.significantMemory ?? null) : null,
     traitTensions: body.traitTensions ?? null
@@ -236,13 +418,14 @@ export async function handleDecisionRequest(body, options = {}) {
     salientActionIds,
     playerSignal: body.playerSignal ?? null,
     playerSignalNote: body.playerSignalNote ?? null,
+    feltOutcomeLine: body.feltOutcomeLine ?? null,
     recentActions: body.recentActions ?? [],
     significantMemory: body.significantMemory ?? null
   }
 
   const parsed = useLocal ? await callOllama(messages, env) : await callOpenAI(messages, env)
 
-  const normalized = normalizeDecision(parsed, availableActions)
+  const normalized = normalizeDecision(parsed, availableActions, { needs: body.needs || {} })
   if (!logLlmIo) return normalized
 
   return {

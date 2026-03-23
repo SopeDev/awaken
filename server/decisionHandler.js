@@ -216,7 +216,7 @@ function normalizeDecision(parsed, availableActions, context = {}) {
       needs: context.needs || {}
     })
   }
-  const extraKeys = ['unease', 'pattern_noticed', 'signal_response', 'guidance', 'state']
+  const extraKeys = ['unease', 'pattern_noticed', 'felt_memory', 'signal_response', 'guidance', 'what_i_am_testing', 'state']
   for (const k of extraKeys) {
     if (safe[k] != null && safe[k] !== '') out[k] = safe[k]
   }
@@ -385,6 +385,9 @@ export async function handleDecisionRequest(body, options = {}) {
     playerSignal: body.playerSignal ?? null,
     playerSignalNote: body.playerSignalNote ?? null,
     feltOutcomeLine: body.feltOutcomeLine ?? null,
+    recentFeltOutcomes: Array.isArray(body.recentFeltOutcomes) ? body.recentFeltOutcomes : [],
+    loopHint: body.loopHint ?? null,
+    patternSummaries: Array.isArray(body.patternSummaries) ? body.patternSummaries : [],
     recentActions: body.recentActions || [],
     significantMemory: consciousnessLevel >= 2 ? (body.significantMemory ?? null) : null,
     traitTensions: body.traitTensions ?? null
@@ -419,6 +422,9 @@ export async function handleDecisionRequest(body, options = {}) {
     playerSignal: body.playerSignal ?? null,
     playerSignalNote: body.playerSignalNote ?? null,
     feltOutcomeLine: body.feltOutcomeLine ?? null,
+    recentFeltOutcomes: body.recentFeltOutcomes ?? [],
+    loopHint: body.loopHint ?? null,
+    patternSummaries: body.patternSummaries ?? [],
     recentActions: body.recentActions ?? [],
     significantMemory: body.significantMemory ?? null
   }

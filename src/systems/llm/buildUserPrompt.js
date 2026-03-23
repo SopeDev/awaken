@@ -10,8 +10,8 @@ import { getActionLabel } from '../../data/actions.js'
 const PLAIN_LANGUAGE_NOTE =
   'Context is in plain language only — no numbers, no game terms.'
 
-/** Recent action IDs shown in the prompt, by consciousness level (0 → 4, 4+ → 10). */
-const RECENT_ACTIONS_LIMIT_BY_LEVEL = [4, 5, 6, 8, 10, 10]
+/** Recent action IDs shown in the prompt, by consciousness level. */
+const RECENT_ACTIONS_LIMIT_BY_LEVEL = [3, 5, 8, 8, 10, 10]
 
 function recentActionsLimit(consciousnessLevel) {
   const lv = Math.max(0, Math.min(5, Number(consciousnessLevel) | 0))
@@ -23,6 +23,26 @@ function formatRecentActions(ids, limit) {
   const slice = ids.slice(-limit)
   const labels = slice.map((id) => getActionLabel(id) || id)
   return `What I have been doing: ${labels.join(', ')}`
+}
+
+function formatRecentFeltOutcomes(lines, limit) {
+  const list = Array.isArray(lines) ? lines.map((x) => String(x || '').trim()).filter(Boolean) : []
+  if (!list.length) return null
+  const slice = list.slice(-limit)
+  return `How recent actions have actually felt:\n- ${slice.join('\n- ')}`
+}
+
+function formatLoopHint(loopHint) {
+  const t = String(loopHint || '').trim()
+  if (!t) return null
+  return `Loop hint:\n${t}`
+}
+
+function formatPatternSummaries(lines, limit) {
+  const list = Array.isArray(lines) ? lines.map((x) => String(x || '').trim()).filter(Boolean) : []
+  if (!list.length) return null
+  const slice = list.slice(-limit)
+  return `Pattern summaries:\n- ${slice.join('\n- ')}`
 }
 
 function formatAvailableActions(availableActions, salientActionIds) {
@@ -51,6 +71,9 @@ function formatAvailableActions(availableActions, salientActionIds) {
  * @param {string|null} [raw.playerSignalNote] explicit first-person line (takes precedence over playerSignal id)
  * @param {string[]} [raw.recentActions]
  * @param {string|null} [raw.feltOutcomeLine] one-line subjective summary of the previous action result
+ * @param {string[]|null} [raw.recentFeltOutcomes] recent subjective outcomes from completed actions
+ * @param {string|null} [raw.loopHint] optional lightweight loop hint
+ * @param {string[]|null} [raw.patternSummaries] optional compact pattern summaries
  * @param {string|null} [raw.significantMemory]
  * @param {Record<string, number>|null} [raw.traitTensions] optional, from cosmic breakdown
  * @param {string[]} [raw.salientActionIds] directional-pull targets only; shown as "id *" in the list
@@ -77,6 +100,14 @@ export function buildUserPromptContent(raw) {
     raw.feltOutcomeLine != null && String(raw.feltOutcomeLine).trim()
       ? String(raw.feltOutcomeLine).trim()
       : null
+  const feltOutcomesLimit = consciousnessLevel >= 4 ? 5 : (consciousnessLevel >= 3 ? 3 : 0)
+  const feltOutcomes = feltOutcomesLimit > 0
+    ? formatRecentFeltOutcomes(raw.recentFeltOutcomes, feltOutcomesLimit)
+    : null
+  const loopHint = consciousnessLevel >= 3 ? formatLoopHint(raw.loopHint) : null
+  const patternSummaries = consciousnessLevel >= 4
+    ? formatPatternSummaries(raw.patternSummaries, 2)
+    : null
 
   const parts = [PLAIN_LANGUAGE_NOTE]
 
@@ -89,6 +120,9 @@ export function buildUserPromptContent(raw) {
   if (traitsDesc) parts.push(traitsDesc)
   if (playerBit) parts.push(playerBit)
   if (feltOutcomeLine) parts.push(`What happened when I did that:\n${feltOutcomeLine}`)
+  if (feltOutcomes) parts.push(feltOutcomes)
+  if (loopHint) parts.push(loopHint)
+  if (patternSummaries) parts.push(patternSummaries)
   if (mem) parts.push(mem)
   if (recent) parts.push(recent)
 

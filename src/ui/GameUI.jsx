@@ -11,6 +11,7 @@ import {
 } from '../constants/uiLayout.js'
 import { AbilityBar } from './AbilityBar/AbilityBar.jsx'
 import { usePortrait } from '../hooks/usePortrait.js'
+import { getCharacterState, setConsciousnessLevel } from '../systems/character/index.js'
 
 const defaultState = {
   needs: {},
@@ -27,6 +28,9 @@ export function GameUI() {
   const [traitsModalOpen, setTraitsModalOpen] = useState(false)
   const [paused, setPaused] = useState(false)
   const [speed, setSpeed] = useState(1)
+  const [consciousnessLevel, setConsciousnessLevelUi] = useState(
+    Math.max(0, Math.min(4, Number(getCharacterState().consciousnessLevel) || 0))
+  )
   const [hudHeight, setHudHeight] = useState(DEFAULT_HUD_CHROME_HEIGHT)
   const portrait = usePortrait()
   const hudRef = useRef(null)
@@ -81,6 +85,14 @@ export function GameUI() {
     EventBus.emit('set-speed', v)
   }
 
+  const setConsciousnessLevelModifier = (nextLevel) => {
+    const v = Number(nextLevel)
+    if (!Number.isFinite(v)) return
+    const level = Math.max(0, Math.min(4, v | 0))
+    setConsciousnessLevel(level)
+    setConsciousnessLevelUi(level)
+  }
+
   return (
     <>
       <div
@@ -133,6 +145,29 @@ export function GameUI() {
             <option value={10}>10x</option>
             <option value={30}>30x</option>
             <option value={60}>60x</option>
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+          <span style={{ fontSize: 11, color: '#b0b0b0' }}>Consciousness</span>
+          <select
+            value={consciousnessLevel}
+            onChange={(e) => setConsciousnessLevelModifier(e.target.value)}
+            style={{
+              fontSize: 12,
+              padding: '4px 8px',
+              background: 'rgba(20,20,20,0.9)',
+              border: '1px solid #444',
+              borderRadius: 6,
+              color: '#e8e8e8',
+              cursor: 'pointer'
+            }}
+          >
+            <option value={0}>0</option>
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+            <option value={4}>4</option>
           </select>
         </div>
       </div>

@@ -145,6 +145,8 @@ const REASONING_LOG_SEPARATOR = '\n'
 
 const buildClamp = (v, min, max) => Math.max(min, Math.min(max, v))
 const getHabituationCounterKey = (actionId, needKey) => `${actionId}:${needKey}`
+const RECENT_FELT_OUTCOMES_MAX = 12
+const RECENT_PATTERN_SUMMARIES_MAX = 8
 
 function isAvoidanceReasonText(reasonText) {
   const t = String(reasonText || '').toLowerCase()
@@ -172,8 +174,10 @@ function buildLlmReasoningPayload(decision, fallbackReasonText) {
       reason: typeof decision.reason === 'string' ? decision.reason : '',
       unease: decision.unease != null && decision.unease !== '' ? decision.unease : null,
       pattern_noticed: decision.pattern_noticed != null && decision.pattern_noticed !== '' ? decision.pattern_noticed : null,
+      felt_memory: decision.felt_memory != null && decision.felt_memory !== '' ? decision.felt_memory : null,
       signal_response: decision.signal_response != null && decision.signal_response !== '' ? decision.signal_response : null,
       guidance: decision.guidance != null && decision.guidance !== '' ? decision.guidance : null,
+      what_i_am_testing: decision.what_i_am_testing != null && decision.what_i_am_testing !== '' ? decision.what_i_am_testing : null,
       state: decision.state != null && decision.state !== '' ? decision.state : null
     }
   }
@@ -183,8 +187,10 @@ function buildLlmReasoningPayload(decision, fallbackReasonText) {
     reason: typeof fallbackReasonText === 'string' ? fallbackReasonText : '',
     unease: null,
     pattern_noticed: null,
+    felt_memory: null,
     signal_response: null,
     guidance: null,
+    what_i_am_testing: null,
     state: null
   }
 }
@@ -228,6 +234,27 @@ function makeDeltaText(before, after) {
   if (delta <= -4) return 'helped a little'
   if (delta > 0) return 'made it worse'
   return 'did not really help'
+}
+
+function buildLoopHintFromRecentActions(recentActionIds) {
+  const ids = Array.isArray(recentActionIds) ? recentActionIds.filter(Boolean) : []
+  if (ids.length < 4) return null
+  const window = ids.slice(-8)
+  const counts = new Map()
+  for (const id of window) {
+    counts.set(id, (counts.get(id) || 0) + 1)
+  }
+  let topId = null
+  let topCount = 0
+  for (const [id, count] of counts.entries()) {
+    if (count > topCount) {
+      topId = id
+      topCount = count
+    }
+  }
+  if (!topId || topCount < 3) return null
+  const label = getActionLabel(topId) || topId
+  return `I keep circling back to ${label}.`
 }
 
 function buildFeltOutcomeLine(actionId, primaryNeedKey, secondaryNeedKey, primaryResult, secondaryResult, needsBefore, needsAfter) {
@@ -328,6 +355,8 @@ export function getCharacterEngine() {
     _activePostActionEvaluation: null,
     _lastPostActionEvaluation: null,
     _pendingFeltOutcomeLine: null,
+    _recentFeltOutcomeLines: [],
+    _recentPatternSummaries: [],
 
     // Snapshot at action start.
     _activeActionNeedsSnapshot: null,
@@ -782,6 +811,7 @@ export function getCharacterEngine() {
       }
 
       const { note, salientActionIds, feltOutcomeLine } = this._snapshotPendingForDecision()
+      const loopHint = buildLoopHintFromRecentActions(this._recentActionIds)
 
       this._decisionInFlight = true
       try {
@@ -794,7 +824,10 @@ export function getCharacterEngine() {
             availableActions: allowedActions,
             salientActionIds,
             significantMemory: null,
-            feltOutcomeLine
+            feltOutcomeLine,
+            recentFeltOutcomes: this._recentFeltOutcomeLines.slice(-5),
+            loopHint,
+            patternSummaries: this._recentPatternSummaries.slice(-2)
           })
         } catch (e) {
           actionId = pickUniformRandomActionId(this.getAvailableActionIdsForDecision())
@@ -1238,6 +1271,10 @@ export function getCharacterEngine() {
 
         this._lastPostActionEvaluation = postActionEvaluation
         this._pendingFeltOutcomeLine = feltOutcome
+        this._recentFeltOutcomeLines.push(feltOutcome)
+        if (this._recentFeltOutcomeLines.length > RECENT_FELT_OUTCOMES_MAX) {
+          this._recentFeltOutcomeLines = this._recentFeltOutcomeLines.slice(-RECENT_FELT_OUTCOMES_MAX)
+        }
       } else {
         this._lastPostActionEvaluation = null
       }
@@ -1302,6 +1339,13 @@ export function getCharacterEngine() {
       if (decision && decision.pattern_noticed) {
         const fill = FILL_BASES.pattern_noticed * meterFillMultiplier
         addPositiveFill('pattern_noticed', fill)
+        this._recentPatternSummaries.push(String(decision.pattern_noticed))
+      }
+      if (decision && decision.felt_memory) {
+        this._recentPatternSummaries.push(String(decision.felt_memory))
+      }
+      if (this._recentPatternSummaries.length > RECENT_PATTERN_SUMMARIES_MAX) {
+        this._recentPatternSummaries = this._recentPatternSummaries.slice(-RECENT_PATTERN_SUMMARIES_MAX)
       }
       if (decision && decision.signal_response) {
         const fill = FILL_BASES.signal_response * meterFillMultiplier
@@ -1400,6 +1444,10 @@ export function getCharacterEngine() {
           actionId,
           level: levelAtAction,
           llmReasoning: buildLlmReasoningPayload(decision, this._activeActionReasonText),
+          gameClock: {
+            minutes: this._gameClockMinutes,
+            label: formatInGameClock(this._gameClockMinutes)
+          },
           realWorldTimestamp,
           needsAtActionStart: needsBefore ? { ...needsBefore } : null,
           awarenessBefore,
@@ -1437,9 +1485,15 @@ export function getCharacterEngine() {
       availableActions = null,
       salientActionIds = null,
       significantMemory = null,
-      feltOutcomeLine = null
+      feltOutcomeLine = null,
+      recentFeltOutcomes = null,
+      loopHint = null,
+      patternSummaries = null
     } = {}) {
       this._lastLLMDecision = null
+      const consciousnessLevel = getCharacterState().consciousnessLevel
+      const recentActionsLimit =
+        consciousnessLevel <= 0 ? 3 : (consciousnessLevel === 1 ? 5 : (consciousnessLevel >= 4 ? 10 : 8))
 
       let traitTensions = null
       if (Array.isArray(this.cosmicChartPlacements) && this.cosmicChartPlacements.length > 0) {
@@ -1463,7 +1517,7 @@ export function getCharacterEngine() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          consciousnessLevel: getCharacterState().consciousnessLevel,
+          consciousnessLevel,
           needs: this.needsState.getNeeds(),
           traits: this.defaultTraits,
           traitTensions,
@@ -1472,7 +1526,10 @@ export function getCharacterEngine() {
           playerSignal,
           playerSignalNote: playerSignalNote ?? null,
           feltOutcomeLine: feltOutcomeLine ?? null,
-          recentActions: this._recentActionIds.slice(-10),
+          recentFeltOutcomes: Array.isArray(recentFeltOutcomes) ? recentFeltOutcomes : [],
+          loopHint: loopHint ?? null,
+          patternSummaries: Array.isArray(patternSummaries) ? patternSummaries : [],
+          recentActions: this._recentActionIds.slice(-recentActionsLimit),
           significantMemory
         })
       })
@@ -1526,7 +1583,7 @@ export function getCharacterEngine() {
       const thought = decision.thought || ''
       const reason = level === 0 ? '' : (decision.reason || '')
       const mainBody = [thought, reason].filter(Boolean).join(' ').trim()
-      const extras = ['unease', 'pattern_noticed', 'signal_response', 'guidance', 'state']
+      const extras = ['unease', 'pattern_noticed', 'felt_memory', 'signal_response', 'guidance', 'what_i_am_testing', 'state']
         .map((k) => (decision[k] ? `${k}: ${decision[k]}` : null))
         .filter(Boolean)
       const parts = [mainBody, ...extras].filter(Boolean)

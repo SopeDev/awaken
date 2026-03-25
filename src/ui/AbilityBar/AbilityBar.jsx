@@ -97,6 +97,11 @@ function AbilitySlot({
   const hoverTimerRef = useRef(null)
   const [isHovered, setIsHovered] = useState(false)
   const [isTooltipVisible, setIsTooltipVisible] = useState(false)
+  const [isFinePointer, setIsFinePointer] = useState(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return true
+    return !!window.matchMedia('(hover: hover) and (pointer: fine)').matches
+  })
+  const longPressFiredRef = useRef(false)
 
   const clearTimer = () => {
     if (hoverTimerRef.current) {
@@ -106,10 +111,23 @@ function AbilitySlot({
   }
 
   useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mq = window.matchMedia('(hover: hover) and (pointer: fine)')
+    const update = () => setIsFinePointer(!!mq.matches)
+    update()
+    if (typeof mq.addEventListener === 'function') {
+      mq.addEventListener('change', update)
+      return () => mq.removeEventListener('change', update)
+    }
+    if (typeof mq.addListener === 'function') {
+      mq.addListener(update)
+      return () => mq.removeListener(update)
+    }
     return () => clearTimer()
   }, [])
 
   const onHoverStart = () => {
+    if (!isFinePointer) return
     setIsHovered(true)
     clearTimer()
     if (!tooltip) return
@@ -122,6 +140,20 @@ function AbilitySlot({
     setIsHovered(false)
     clearTimer()
     setIsTooltipVisible(false)
+    longPressFiredRef.current = false
+  }
+
+  const startLongPress = () => {
+    if (isFinePointer) return
+    if (!tooltip) return
+    setIsHovered(true)
+    setIsTooltipVisible(false)
+    longPressFiredRef.current = false
+    clearTimer()
+    hoverTimerRef.current = setTimeout(() => {
+      setIsTooltipVisible(true)
+      longPressFiredRef.current = true
+    }, TOOLTIP_DELAY_MS)
   }
 
   return (
@@ -129,6 +161,7 @@ function AbilitySlot({
       role={onActivate ? 'button' : undefined}
       tabIndex={canClick ? 0 : undefined}
       onClick={() => {
+        if (longPressFiredRef.current) return
         if (!canClick) return
         onActivate()
       }}
@@ -136,6 +169,13 @@ function AbilitySlot({
       onMouseLeave={onHoverEnd}
       onFocus={onHoverStart}
       onBlur={onHoverEnd}
+      onPointerDown={(e) => {
+        // On mobile, taps can trigger synthetic mouse hover.
+        // Use a long-press timer instead for coarse pointers.
+        if (e.pointerType !== 'mouse') startLongPress()
+      }}
+      onPointerUp={onHoverEnd}
+      onPointerCancel={onHoverEnd}
       onKeyDown={(e) => {
         if (!canClick) return
         if (e.key === 'Enter' || e.key === ' ') {

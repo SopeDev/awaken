@@ -560,7 +560,18 @@ export function getCharacterEngine() {
       let noteText = null
       if (deepToAttune.length) {
         noteText = buildIntuitionFeltLineForObjectTypes(deepToAttune)
-        if (noteText) this._setPendingPlayerNote(noteText)
+        if (noteText) {
+          this._setPendingPlayerNote(noteText)
+
+          // Also show this intuition “felt thought” immediately in the UI reasoning box.
+          // This is separate from the next LLM decision, so players get instant feedback.
+          const clockLabel = formatInGameClock(this._gameClockMinutes)
+          const entryText = `${clockLabel}:  ${noteText}`
+          this._reasoningLog.unshift(entryText)
+          if (this._reasoningLog.length > RECENT_DECISION_HISTORY_MAX) {
+            this._reasoningLog.length = RECENT_DECISION_HISTORY_MAX
+          }
+        }
       }
 
       this._logSignal({

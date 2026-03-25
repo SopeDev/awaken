@@ -51,12 +51,12 @@ export function buildIntuitionFeltLineForObjectTypes(objectTypeIds) {
   if (!phrases.length) return null
 
   if (phrases.length === 1) {
-    return `Something about the ${phrases[0]} keeps pulling at me.`
+    return `*The ${phrases[0]} catches my attention*`
   }
   if (phrases.length === 2) {
-    return `Something about the ${phrases[0]} and the ${phrases[1]} keeps pulling at me.`
+    return `*The ${phrases[0]} and the ${phrases[1]} catch my attention*`
   }
   const head = phrases.slice(0, -1).join(', the ')
   const last = phrases[phrases.length - 1]
-  return `Something about the ${head}, and the ${last}, keeps pulling at me.`
+  return `*The ${head}, and the ${last}, catch my attention*`
 }

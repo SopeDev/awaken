@@ -9,8 +9,15 @@ import {
   SYNCHRONICITY_COOLDOWN_MS
 } from '../../systems/playerSignals/constants.js'
 import { EventBus } from '../../eventBus.js'
+import { BASELINE_AWARENESS_MAX } from '../../systems/awareness/index.js'
+import { useEffect, useRef, useState } from 'react'
 
 const BAR_PADDING_ABOVE_HUD_PX = 12
+
+function tooltip(name, description) {
+  const d = String(description || '').trim()
+  return d ? `${name}\n${d}` : String(name || '')
+}
 
 function IconDirectional() {
   return (
@@ -86,15 +93,49 @@ function AbilitySlot({
   const canClick = onActivate && !onCd && !disabledByPhase
   const isGroup = variant === 'group'
 
+  const TOOLTIP_DELAY_MS = 1000
+  const hoverTimerRef = useRef(null)
+  const [isHovered, setIsHovered] = useState(false)
+  const [isTooltipVisible, setIsTooltipVisible] = useState(false)
+
+  const clearTimer = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = null
+    }
+  }
+
+  useEffect(() => {
+    return () => clearTimer()
+  }, [])
+
+  const onHoverStart = () => {
+    setIsHovered(true)
+    clearTimer()
+    if (!tooltip) return
+    hoverTimerRef.current = setTimeout(() => {
+      setIsTooltipVisible(true)
+    }, TOOLTIP_DELAY_MS)
+  }
+
+  const onHoverEnd = () => {
+    setIsHovered(false)
+    clearTimer()
+    setIsTooltipVisible(false)
+  }
+
   return (
     <div
-      title={tooltip}
       role={onActivate ? 'button' : undefined}
       tabIndex={canClick ? 0 : undefined}
       onClick={() => {
         if (!canClick) return
         onActivate()
       }}
+      onMouseEnter={onHoverStart}
+      onMouseLeave={onHoverEnd}
+      onFocus={onHoverStart}
+      onBlur={onHoverEnd}
       onKeyDown={(e) => {
         if (!canClick) return
         if (e.key === 'Enter' || e.key === ' ') {
@@ -114,7 +155,7 @@ function AbilitySlot({
             ? 'linear-gradient(180deg, #262626 0%, #1a1a1a 100%)'
             : 'linear-gradient(180deg, #2e2e2e 0%, #222 100%)',
         boxShadow: isGroup ? 'none' : 'inset 0 1px 0 rgba(255,255,255,0.06)',
-        overflow: 'hidden',
+        overflow: 'visible',
         flexShrink: 0,
         cursor: canClick ? 'pointer' : inactive ? 'not-allowed' : 'default',
         outline: 'none',
@@ -191,6 +232,81 @@ function AbilitySlot({
       >
         {keybind}
       </span>
+
+      {isHovered && isTooltipVisible && tooltip ? (
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            bottom: 'calc(100% + 10px)',
+            transform: 'translateX(-50%)',
+            width: 240,
+            maxWidth: 280,
+            background:
+              'linear-gradient(180deg, rgba(10,10,12,0.96) 0%, rgba(6,6,8,0.94) 100%)',
+            border: '1px solid rgba(210,210,210,0.22)',
+            borderRadius: 10,
+            padding: '10px 12px',
+            boxShadow:
+              '0 10px 28px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)',
+            color: '#e8e8e8',
+            fontSize: 12,
+            lineHeight: 1.25,
+            textShadow: '0 1px 0 rgba(0,0,0,0.6)',
+            whiteSpace: 'pre-wrap',
+            pointerEvents: 'none',
+            zIndex: 9999
+          }}
+        >
+          {(() => {
+            const s = String(tooltip || '')
+            const parts = s.split('\n\n')
+            const first = parts[0] || ''
+            const firstLines = first.split('\n')
+            const title = firstLines[0] || ''
+            const description = firstLines.slice(1).join('\n')
+            const extras = parts.slice(1)
+
+            return (
+              <>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 800,
+                    color: '#e6ddab',
+                    letterSpacing: 0.2,
+                    marginBottom: 8
+                  }}
+                >
+                  {title}
+                </div>
+                {description ? (
+                  <div style={{ color: '#d9d9d9', marginBottom: extras.length ? 8 : 0 }}>
+                    {description}
+                  </div>
+                ) : null}
+                {extras.length
+                  ? extras.map((block, idx) => (
+                      <div
+                        // eslint-disable-next-line react/no-array-index-key
+                        key={idx}
+                        style={{
+                          marginTop: idx === 0 ? 0 : 8,
+                          paddingTop: 8,
+                          borderTop: idx === 0 ? '1px solid rgba(210,210,210,0.14)' : '1px solid rgba(210,210,210,0.10)',
+                          color: '#bfb17d',
+                          fontSize: 11
+                        }}
+                      >
+                        {block}
+                      </div>
+                    ))
+                  : null}
+              </>
+            )
+          })()}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -204,7 +320,9 @@ function AbilitySlot({
 export function AbilityBar({
   signalCooldownsMs = {},
   avatarPhase = AVATAR_PHASE.AWAITING,
-  hudHeight = 200
+  hudHeight = 200,
+  consciousnessLevel = 0,
+  awarenessDynamicBuffer = 0
 }) {
   const d = Number(signalCooldownsMs.directional) || 0
   const i = Number(signalCooldownsMs.intuition) || 0
@@ -213,6 +331,16 @@ export function AbilityBar({
   const directionalPhaseLocked = avatarPhase === AVATAR_PHASE.PERFORMING
   const synchronicityPhaseLocked =
     avatarPhase === AVATAR_PHASE.AWAITING || avatarPhase === AVATAR_PHASE.WALKING
+
+  const dyn = Math.max(0, Math.min(BASELINE_AWARENESS_MAX, Number(awarenessDynamicBuffer) || 0))
+  const dynScale = dyn / BASELINE_AWARENESS_MAX
+  const synchronicityNoticeP = Math.max(0, Math.min(1, 0.5 + dynScale))
+  const synchronicityChancePct = Math.round(synchronicityNoticeP * 100)
+
+  const dirConsciousnessLine = `Affected by: avatar consciousness level. Current = ${consciousnessLevel}.`
+  const directionalCanOnlyUseLine =
+    'Can only use when you are not mid-action (locked while performing an action).'
+  const synchronicityCanOnlyUseLine = 'Can only use while you are actively performing an action.'
 
   return (
     <div
@@ -239,7 +367,7 @@ export function AbilityBar({
           alignItems: 'stretch',
           borderRadius: 8,
           border: '1px solid #4a4a4a',
-          overflow: 'hidden',
+          overflow: 'visible',
           flexShrink: 0
         }}
       >
@@ -248,11 +376,10 @@ export function AbilityBar({
           remainingMs={d}
           totalMs={DIRECTIONAL_PULL_COOLDOWN_MS}
           keybind="W"
-          tooltip={
-            directionalPhaseLocked
-              ? 'Unavailable while you are mid-action.'
-              : 'A faint pull toward the north. W.'
-          }
+          tooltip={tooltip(
+            'Directional Pull',
+            `Pulls you toward the north sector. ${dirConsciousnessLine} Nearby matching objects glow, nudging your next choice in that direction.\n\n${directionalCanOnlyUseLine}`
+          )}
           onActivate={() => EventBus.emit('ability-signal', { type: 'directional', direction: 'w' })}
           icon={<IconArrow rotationDeg={0} />}
           disabledByPhase={directionalPhaseLocked}
@@ -263,11 +390,10 @@ export function AbilityBar({
           remainingMs={d}
           totalMs={DIRECTIONAL_PULL_COOLDOWN_MS}
           keybind="A"
-          tooltip={
-            directionalPhaseLocked
-              ? 'Unavailable while you are mid-action.'
-              : 'A faint pull toward the west. A.'
-          }
+          tooltip={tooltip(
+            'Directional Pull',
+            `Pulls you toward the west sector. ${dirConsciousnessLine} Nearby matching objects glow, nudging your next choice in that direction.\n\n${directionalCanOnlyUseLine}`
+          )}
           onActivate={() => EventBus.emit('ability-signal', { type: 'directional', direction: 'a' })}
           icon={<IconArrow rotationDeg={-90} />}
           disabledByPhase={directionalPhaseLocked}
@@ -278,11 +404,10 @@ export function AbilityBar({
           remainingMs={d}
           totalMs={DIRECTIONAL_PULL_COOLDOWN_MS}
           keybind="S"
-          tooltip={
-            directionalPhaseLocked
-              ? 'Unavailable while you are mid-action.'
-              : 'A faint pull toward the south. S.'
-          }
+          tooltip={tooltip(
+            'Directional Pull',
+            `Pulls you toward the south sector. ${dirConsciousnessLine} Nearby matching objects glow, nudging your next choice in that direction.\n\n${directionalCanOnlyUseLine}`
+          )}
           onActivate={() => EventBus.emit('ability-signal', { type: 'directional', direction: 's' })}
           icon={<IconArrow rotationDeg={180} />}
           disabledByPhase={directionalPhaseLocked}
@@ -293,11 +418,10 @@ export function AbilityBar({
           remainingMs={d}
           totalMs={DIRECTIONAL_PULL_COOLDOWN_MS}
           keybind="D"
-          tooltip={
-            directionalPhaseLocked
-              ? 'Unavailable while you are mid-action.'
-              : 'A faint pull toward the east. D.'
-          }
+          tooltip={tooltip(
+            'Directional Pull',
+            `Pulls you toward the east sector. ${dirConsciousnessLine} Nearby matching objects glow, nudging your next choice in that direction.\n\n${directionalCanOnlyUseLine}`
+          )}
           onActivate={() => EventBus.emit('ability-signal', { type: 'directional', direction: 'd' })}
           icon={<IconArrow rotationDeg={90} />}
           disabledByPhase={directionalPhaseLocked}
@@ -307,7 +431,10 @@ export function AbilityBar({
         remainingMs={i}
         totalMs={INTUITION_PULSE_COOLDOWN_MS}
         keybind="Space"
-        tooltip="Whatever is right beside you suddenly stands out. Space."
+        tooltip={tooltip(
+          'Intuition Pulse',
+          'Attunes nearby objects so hidden meaning becomes visible. Area effect: 3x3 tiles around your avatar. Hidden-depth objects gain a glow, and their actions are treated as important next time you decide. If there are no eligible hidden-depth objects, you only get brief feedback and no attunement is added.'
+        )}
         onActivate={() => EventBus.emit('ability-signal', { type: 'intuition' })}
         icon={<IconIntuition />}
       />
@@ -315,11 +442,10 @@ export function AbilityBar({
         remainingMs={s}
         totalMs={SYNCHRONICITY_COOLDOWN_MS}
         keybind="E"
-        tooltip={
-          synchronicityPhaseLocked
-            ? 'Only when you are already doing something.'
-            : 'Invite a small, uncanny moment inside whatever you are doing. E.'
-        }
+        tooltip={tooltip(
+          'Synchronicity',
+          `Tries to turn attunement into a discovery for your current action. Chance to succeed: 50% + (dynamic awareness / 50). Current: ${synchronicityChancePct}%. On success, you may get a note and discoveries can unlock new actions.\n\n${synchronicityCanOnlyUseLine}`
+        )}
         onActivate={() => EventBus.emit('ability-signal', { type: 'synchronicity' })}
         icon={<IconSynchronicity />}
         disabledByPhase={synchronicityPhaseLocked}

@@ -1,5 +1,6 @@
 import { ENTROPY_STRIP_HEIGHT } from '../constants/uiLayout.js'
 import { BASELINE_AWARENESS_MAX } from '../systems/awareness/index.js'
+import { useEffect, useRef, useState } from 'react'
 
 const PADDING = 18
 const LABEL_WIDTH = 88
@@ -81,11 +82,48 @@ export function AwarenessStrip({
   const d = Math.max(0, Math.min(b, Number.isFinite(dRaw) ? dRaw : 0))
   const effInstant = Math.min(b + d, 100)
   const w = computeBandWidths(effInstant, b)
+  const successChancePct = Math.round((0.5 + d / BASELINE_AWARENESS_MAX) * 100)
+  const tooltipText = [
+    'Awareness',
+    'Baseline: needs-driven meter (0..50).',
+    'Dynamic: decision-driven add-on (0..baseline).',
+    'Final meter: baseline + dynamic (0..100, capped by UI bands).',
+    `Synchronicity success chance: 50% + dynamic/50 (currently ~${successChancePct}%).`
+  ].join('\n')
+
+  const TOOLTIP_DELAY_MS = 1000
+  const hoverTimerRef = useRef(null)
+  const [isHovered, setIsHovered] = useState(false)
+  const [isTooltipVisible, setIsTooltipVisible] = useState(false)
+
+  const clearTimer = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = null
+    }
+  }
+
+  useEffect(() => {
+    return () => clearTimer()
+  }, [])
+
+  const onHoverStart = () => {
+    setIsHovered(true)
+    clearTimer()
+    hoverTimerRef.current = setTimeout(() => setIsTooltipVisible(true), TOOLTIP_DELAY_MS)
+  }
+
+  const onHoverEnd = () => {
+    setIsHovered(false)
+    clearTimer()
+    setIsTooltipVisible(false)
+  }
 
   return (
     <div
       className="awareness-strip"
       style={{
+        position: 'relative',
         width: '100%',
         height: ENTROPY_STRIP_HEIGHT,
         flexShrink: 0,
@@ -95,8 +133,12 @@ export function AwarenessStrip({
         alignItems: 'center',
         paddingLeft: PADDING,
         paddingRight: PADDING,
-        boxSizing: 'border-box'
+        boxSizing: 'border-box',
+        overflow: 'visible',
+        pointerEvents: 'auto'
       }}
+      onMouseEnter={onHoverStart}
+      onMouseLeave={onHoverEnd}
     >
       <span style={{ fontSize: 12, color: '#b0b0b0', width: LABEL_WIDTH }}>Awareness</span>
       <div
@@ -131,6 +173,54 @@ export function AwarenessStrip({
         ) : null}
         <Segment widthPct={w.beyondCap} background={TONE.emptyBaselineAndBeyond} />
       </div>
+
+      {isHovered && isTooltipVisible ? (
+        <div
+          style={{
+            position: 'absolute',
+            left: PADDING,
+            right: PADDING,
+            bottom: 'calc(100% + 10px)',
+            background:
+              'linear-gradient(180deg, rgba(10,10,12,0.96) 0%, rgba(6,6,8,0.94) 100%)',
+            border: '1px solid rgba(210,210,210,0.22)',
+            borderRadius: 10,
+            padding: '10px 12px',
+            boxShadow:
+              '0 10px 28px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)',
+            color: '#e8e8e8',
+            fontSize: 12,
+            lineHeight: 1.25,
+            textShadow: '0 1px 0 rgba(0,0,0,0.6)',
+            whiteSpace: 'pre-wrap',
+            pointerEvents: 'none',
+            zIndex: 9999
+          }}
+        >
+          {(() => {
+            const parts = String(tooltipText || '')
+            const lines = parts.split('\n')
+            const title = lines[0] || ''
+            const bodyLines = lines.slice(1)
+            return (
+              <>
+                <div style={{ fontWeight: 800, color: '#e6ddab', marginBottom: 8, fontSize: 13 }}>
+                  {title}
+                </div>
+                {bodyLines.map((l, idx) => (
+                  <div
+                    // eslint-disable-next-line react/no-array-index-key
+                    key={idx}
+                    style={{ color: '#d9d9d9', fontSize: 12 }}
+                  >
+                    {l}
+                  </div>
+                ))}
+              </>
+            )
+          })()}
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -239,6 +239,8 @@ export function GameUI() {
         signalCooldownsMs={state.signalCooldownsMs}
         avatarPhase={state.avatarPhase}
         hudHeight={hudHeight}
+        consciousnessLevel={consciousnessLevel}
+        awarenessDynamicBuffer={state.awarenessDynamicBuffer}
       />
       <TraitsModal
         open={traitsModalOpen}

@@ -641,13 +641,18 @@ export function getCharacterEngine() {
       const traits = this.defaultTraits || {}
       const perception = Number(traits.perception ?? 50)
       const boredom = Number(this.needsState.getNeeds().boredom ?? 0)
+
+      // Synchronicity availability: baseline 50% + dynamic awareness amount.
+      // Dynamic awareness is stored in `awarenessDynamicBuffer` and is in the 0..50 range.
+      const dynamicAwarenessLevel = Number(this.awarenessDynamicBuffer) || 0
+      const dynamicScale = dynamicAwarenessLevel / BASELINE_AWARENESS_MAX
+      const noticeP = buildClamp(0.5 + dynamicScale, 0, 1)
+
+      // Keep the old priming signal for logging/debug context.
       const primed =
         perception > SYNCHRONICITY_NOTICE_PERCEPTION_THRESHOLD ||
         boredom > SYNCHRONICITY_NOTICE_BOREDOM_THRESHOLD ||
         level >= SYNCHRONICITY_NOTICE_LEVEL_MIN
-      const noticeP = primed
-        ? SYNCHRONICITY_NOTICE_PRIMED_CHANCE
-        : SYNCHRONICITY_NOTICE_BASE_CHANCE
       const noticed = Math.random() < noticeP
 
       if (!noticed) {

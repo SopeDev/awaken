@@ -46,7 +46,7 @@ export const BASE_DRIFT = {
  * Deltas push needs toward 0 (restoring satisfaction).
  */
 export const ACTION_EFFECTS = {
-  go_back_to_sleep: { fatigue: -45, stress: -5 },
+  go_to_sleep: { fatigue: -45, stress: -5 },
   check_phone: { boredom: -18, loneliness: -6, stress: 6 },
   watch_tv: { boredom: -22, loneliness: -3, stress: 4 },
   look_out_window: { boredom: -6, stress: -6, loneliness: -8 },

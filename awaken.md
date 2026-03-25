@@ -1618,7 +1618,7 @@ Each action restores or modifies specific needs when executed.
 
 ```javascript
 const actionEffects = {
-  go_back_to_sleep:  { fatigue: -25, boredom: -10, hunger: +5,  stress: -10 },
+  go_to_sleep:  { fatigue: -25, boredom: -10, hunger: +5,  stress: -10 },
   check_phone:       { boredom: -30, stress: +5,   connection_need: -10, fatigue: +2 },
   watch_tv:          { boredom: -25, stress: -5,   fatigue: +5,  connection_need: -5 },
   sit_on_bed:        { fatigue: -5,  stress: -5,   boredom: +5 },
@@ -1926,7 +1926,7 @@ The avatar starts at **Consciousness Level 0 (Asleep)** with a score of ~15.
 ### Available Actions (Initial)
 
 ```
-go_back_to_sleep
+go_to_sleep
 check_phone
 watch_tv
 sit_on_bed
@@ -1940,7 +1940,7 @@ look_out_window
 
 **Default (no player influence):**
 - check phone
-- go back to sleep
+- go to sleep
 
 **Player Influence:**
 - dream symbols

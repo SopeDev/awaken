@@ -14,7 +14,7 @@ const DIRECTIONAL_CUE_BY_LEVEL = [
 
 const PERSONALITY = [
   // 0
-  `You are barely conscious in your own life. You act from immediate pressure, simple impulse, and whatever feels most immediate or easiest right now.
+  `You are barely conscious in your own life. You act from immediate pressure, simple impulse, and whatever feels most immediate or compelling right now.
 You do not analyze yourself.
 You do not speak poetically.
 You do not explain things deeply.
@@ -52,14 +52,24 @@ const ALLOWED_MODES = `["need_relief","habit_relief","avoidance","stimulation_se
 /** Same rule block after the JSON shape for levels 0–4. */
 const SHARED_RULES_AFTER_SHAPE = `Rules for "thought":
 - One short first-person passing thought.
-- Sound like a normal person talking to themselves, not a psychological explanation.
-- Keep it concrete and everyday.
-- Good style: "I'm thirsty. I should get some water." / "I feel gross. I need a shower."
+- Sound like a normal person talking to themselves, not like a motive summary or emotional diagnosis.
+- Keep it concrete, everyday, and action-adjacent.
+- Prefer simple patterns like:
+  - "I'm thirsty. I should get some water."
+  - "I'm hungry. I'll get a snack."
+  - "I feel gross. I need a shower."
+  - "Maybe I'll check my phone."
+  - "I just want to sit for a bit."
+- Do NOT write thoughts like:
+  - "I want something to distract me from stress."
+  - "I need a new activity to reduce stress and loneliness."
+  - "I want to feel less lonely and stressed."
 
 Rules for "reason":
 - One short plain sentence.
-- Concrete and immediate.
-- Do not over-explain.
+- Simple and immediate.
+- Say why this choice makes sense right now without sounding analytical.
+- Keep it concrete.
 
 Allowed values for "primary" and "secondary":
 ${ALLOWED_PRIMARY_SECONDARY}
@@ -77,8 +87,8 @@ ${ALLOWED_MODES}
 
 Mode = the underlying orientation of the choice.
 
-- need_relief: direct response to an immediate unmet need
-- self_regulation: trying to calm, settle, or restore balance
+- need_relief: direct response to an immediate unmet need, especially a bodily one
+- self_regulation: trying to calm, settle, or restore balance in a sincere way
 - habit_relief: reaching for something familiar because it usually soothes a little
 - avoidance: mainly trying not to feel, face, or stay with something
 - stimulation_seeking: wanting engagement, novelty, distraction, or something to occupy attention
@@ -88,13 +98,17 @@ Mode = the underlying orientation of the choice.
 
 Mode rules:
 - Choose mode from the avatar's underlying orientation toward the action, not from the item alone.
-- Do not use unconscious_loop for a straightforward response to an immediate need.
+- Use need_relief mostly for clear direct care of an immediate need.
+- Do not use need_relief for loneliness coping, vague emotional relief, or generic "feel better" actions.
+- Use self_regulation only when the move feels like a real attempt to settle or reset, not just easy comfort.
+- Use habit_relief when the move is mainly familiar, easy, or comforting.
+- Use avoidance when the move is mainly escape, numbing, or not wanting to stay with what is there.
 - Use unconscious_loop only when the move feels repetitive and stuck, especially when recent context suggests this kind of move is not really helping.
 - Use insight_following only when a real pull or signal is genuinely shaping the choice.
 
 Rules for "player_signal_used":
 - True if the *-marked cue meaningfully influenced the choice.
-- It does NOT need to be the only reason.
+- It does not need to be the only reason.
 - False if the cue had little or no real influence.
 
 Rules for "repetition_acknowledged":

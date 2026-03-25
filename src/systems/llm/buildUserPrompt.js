@@ -5,37 +5,46 @@
 import { buildNeedsDescription } from './needsLanguage.js'
 import { buildTraitsDescription, flattenTraits } from './traitLanguage.js'
 import { describePlayerSignal } from './playerSignalLanguage.js'
-import { getActionLabel } from '../../data/actions.js'
+import { getActionLabel, getActionPastPhrase } from '../../data/actions.js'
 
 const PLAIN_LANGUAGE_NOTE =
   'Context is in plain language only — no numbers, no game terms.'
 
-/** Recent action IDs shown in the prompt, by consciousness level. */
-const RECENT_ACTIONS_LIMIT_BY_LEVEL = [3, 5, 8, 8, 10, 10]
+/** Last N completed actions, each with a one-line subjective outcome (plain language). */
+const RECENT_ACTIVITY_LINE_COUNT = 3
 
-function recentActionsLimit(consciousnessLevel) {
-  const lv = Math.max(0, Math.min(5, Number(consciousnessLevel) | 0))
-  return RECENT_ACTIONS_LIMIT_BY_LEVEL[lv]
+/** Strip legacy "Watch TV …" prefix so we do not repeat the action before the em dash. */
+function normalizeFeltTailForAction(actionId, outcomeLine) {
+  const raw = String(outcomeLine || '').trim()
+  if (!raw) return ''
+  if (raw.toLowerCase().startsWith('it ')) return raw
+
+  const label = getActionLabel(actionId) || String(actionId).replace(/_/g, ' ')
+  const cap = label.charAt(0).toUpperCase() + label.slice(1)
+  let rest = raw
+  if (rest.startsWith(`${cap} `)) rest = rest.slice(cap.length + 1).trim()
+  else if (rest.toLowerCase().startsWith(`${label.toLowerCase()} `)) rest = rest.slice(label.length + 1).trim()
+
+  if (!rest.toLowerCase().startsWith('it ')) rest = `it ${rest}`
+  return rest
 }
 
-function formatRecentActions(ids, limit) {
-  if (!ids || !ids.length) return null
-  const slice = ids.slice(-limit)
-  const labels = slice.map((id) => getActionLabel(id) || id)
-  return labels.join(', ')
-}
+function formatRecentActivityWithOutcomes(actionIds, outcomeLines) {
+  const ids = Array.isArray(actionIds) ? actionIds.filter(Boolean) : []
+  if (!ids.length) return null
 
-function formatLastAction(ids) {
-  if (!ids || !ids.length) return null
-  const last = ids[ids.length - 1]
-  return getActionLabel(last) || String(last)
-}
+  const n = Math.min(RECENT_ACTIVITY_LINE_COUNT, ids.length)
+  const idSlice = ids.slice(-n)
+  const rawOutcomes = Array.isArray(outcomeLines) ? outcomeLines.map((x) => String(x ?? '').trim()) : []
+  let outSlice = rawOutcomes.slice(-n)
+  while (outSlice.length < idSlice.length) outSlice.unshift('')
 
-function formatRecentFeltOutcomes(lines, limit) {
-  const list = Array.isArray(lines) ? lines.map((x) => String(x || '').trim()).filter(Boolean) : []
-  if (!list.length) return null
-  const slice = list.slice(-limit)
-  return `How recent actions have actually felt:\n- ${slice.join('\n- ')}`
+  const lines = idSlice.map((actionId, i) => {
+    const past = getActionPastPhrase(actionId) || getActionLabel(actionId) || String(actionId)
+    const tail = normalizeFeltTailForAction(actionId, outSlice[i])
+    return tail ? `- ${past} — ${tail}` : `- ${past}`
+  })
+  return `What I have been doing lately:\n${lines.join('\n')}`
 }
 
 function formatLoopHint(loopHint) {
@@ -76,8 +85,8 @@ function formatAvailableActions(availableActions, salientActionIds) {
  * @param {string|null} [raw.playerSignal]
  * @param {string|null} [raw.playerSignalNote] explicit first-person line (takes precedence over playerSignal id)
  * @param {string[]} [raw.recentActions]
- * @param {string|null} [raw.feltOutcomeLine] one-line subjective summary of the previous action result
- * @param {string[]|null} [raw.recentFeltOutcomes] recent subjective outcomes from completed actions
+ * @param {string|null} [raw.feltOutcomeLine] optional; merged into recent activity lines when arrays lag by one tick
+ * @param {string[]|null} [raw.recentFeltOutcomes] subjective tails ("it …") per completed action, newest last
  * @param {string|null} [raw.loopHint] optional lightweight loop hint
  * @param {string[]|null} [raw.patternSummaries] optional compact pattern summaries
  * @param {string|null} [raw.significantMemory]
@@ -97,19 +106,26 @@ export function buildUserPromptContent(raw) {
       ? String(raw.playerSignalNote).trim()
       : null
   const playerBit = explicitNote || describePlayerSignal(raw.playerSignal)
-  const recent = formatRecentActions(
-    raw.recentActions,
-    recentActionsLimit(consciousnessLevel)
-  )
   const mem = raw.significantMemory && String(raw.significantMemory).trim()
   const feltOutcomeLine =
     raw.feltOutcomeLine != null && String(raw.feltOutcomeLine).trim()
       ? String(raw.feltOutcomeLine).trim()
       : null
-  const feltOutcomesLimit = consciousnessLevel >= 4 ? 5 : (consciousnessLevel >= 3 ? 3 : 0)
-  const feltOutcomes = feltOutcomesLimit > 0
-    ? formatRecentFeltOutcomes(raw.recentFeltOutcomes, feltOutcomesLimit)
-    : null
+
+  let outcomeLinesForActivity = Array.isArray(raw.recentFeltOutcomes)
+    ? [...raw.recentFeltOutcomes]
+    : []
+  const actionIdsForActivity = Array.isArray(raw.recentActions) ? [...raw.recentActions] : []
+  if (
+    feltOutcomeLine &&
+    actionIdsForActivity.length === outcomeLinesForActivity.length + 1
+  ) {
+    outcomeLinesForActivity = [...outcomeLinesForActivity, feltOutcomeLine]
+  }
+  const recentActivity = formatRecentActivityWithOutcomes(
+    actionIdsForActivity,
+    outcomeLinesForActivity
+  )
   const loopHint = consciousnessLevel >= 3 ? formatLoopHint(raw.loopHint) : null
   const patternSummaries = consciousnessLevel >= 4
     ? formatPatternSummaries(raw.patternSummaries, 2)
@@ -120,14 +136,12 @@ export function buildUserPromptContent(raw) {
   parts.push(`How I feel:\n${needsDesc}`)
 
   if (traitsDesc) parts.push(`How I tend to be:\n${traitsDesc}`)
-  if (recent) parts.push(`What I have been doing lately:\n${recent}`)
-
-  const lastAction = formatLastAction(raw.recentActions)
-  if (lastAction) parts.push(`What I did last:\n${lastAction}`)
-
-  if (feltOutcomeLine) parts.push(`What happened:\n${feltOutcomeLine}`)
+  if (recentActivity) parts.push(recentActivity)
+  else if (feltOutcomeLine) {
+    const tail = normalizeFeltTailForAction('', feltOutcomeLine)
+    if (tail) parts.push(`What happened:\n${tail}`)
+  }
   if (playerBit) parts.push(playerBit)
-  if (feltOutcomes) parts.push(feltOutcomes)
   if (loopHint) parts.push(loopHint)
   if (patternSummaries) parts.push(patternSummaries)
   if (mem) parts.push(mem)

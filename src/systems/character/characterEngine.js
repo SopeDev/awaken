@@ -72,6 +72,10 @@ const AWARENESS_ENTRAPMENT_THRESHOLD = 20
 const AWARENESS_CLARITY_THRESHOLD = 80
 /** Seconds-like smoothing; higher = snappier toward target baseline. */
 const BASELINE_AWARENESS_SMOOTH_TAU_MS = 180
+/** Extra awareness gained when the LLM indicates player-signal genuinely influenced choice. */
+const PLAYER_SIGNAL_USED_AWARENESS_BONUS = 5
+/** Awareness penalty when the LLM says player-signal was ignored. */
+const PLAYER_SIGNAL_IGNORED_AWARENESS_PENALTY = -2
 
 const NEED_RESULT_HELPED_A_LOT = 'helped_a_lot'
 const NEED_RESULT_HELPED_A_LITTLE = 'helped_a_little'
@@ -192,14 +196,13 @@ function buildLoopHintFromRecentActions(recentActionIds) {
   return `I keep circling back to ${label}.`
 }
 
-function buildFeltOutcomeLine(actionId, primaryNeedKey, secondaryNeedKey, primaryResult, secondaryResult, needsBefore, needsAfter) {
-  const actionLabel = getActionLabel(actionId) || actionId || 'that'
-  const actionText = actionLabel.charAt(0).toUpperCase() + actionLabel.slice(1)
+/** Subjective outcome phrasing after an em dash ("it …"), for pairing with the past-tense action. */
+function buildFeltOutcomeTail(primaryNeedKey, secondaryNeedKey, primaryResult, secondaryResult, needsBefore, needsAfter) {
   const hasPrimaryNeed = !!primaryNeedKey
   const hasSecondaryNeed = !!secondaryNeedKey
 
   if (!hasPrimaryNeed && !hasSecondaryNeed) {
-    return `${actionText} did not really help.`
+    return 'it did not really help.'
   }
 
   if (hasPrimaryNeed && hasSecondaryNeed && primaryNeedKey !== secondaryNeedKey) {
@@ -207,24 +210,55 @@ function buildFeltOutcomeLine(actionId, primaryNeedKey, secondaryNeedKey, primar
     const sText = makeDeltaText(needsBefore?.[secondaryNeedKey], needsAfter?.[secondaryNeedKey])
     const primaryLabel = NEED_LABELS[primaryNeedKey]?.toLowerCase() || primaryNeedKey
     const secondaryLabel = NEED_LABELS[secondaryNeedKey]?.toLowerCase() || secondaryNeedKey
+
+    // Converts delta text into a clause without the leading subject ("it ...").
+    const clauseFor = (deltaText, label) => {
+      if (deltaText === 'did not really help') return `did not help with ${label}`
+      if (deltaText === 'made it worse') return `made ${label} worse`
+      return `${deltaText} with ${label}`
+    }
+
     if (isSuccessResult(primaryResult) && isFailureResult(secondaryResult)) {
-      return `${actionText} ${pText} with ${primaryLabel}. I still feel ${secondaryLabel}.`
+      return `it ${pText} with ${primaryLabel}. I still feel ${secondaryLabel}.`
     }
     if (isFailureResult(primaryResult) && isSuccessResult(secondaryResult)) {
-      return `${actionText} helped ${secondaryLabel}. I still feel ${primaryLabel}.`
+      return `it ${sText} with ${secondaryLabel}. I still feel ${primaryLabel}.`
     }
+    if (isSuccessResult(primaryResult) && isSuccessResult(secondaryResult)) {
+      return `it ${pText} with ${primaryLabel} and ${sText} with ${secondaryLabel}.`
+    }
+
+    // Both are failures: either no meaningful help or got worse.
+    // We spell out both remaining/problem needs to avoid vague "did not help".
     if (isFailureResult(primaryResult) && isFailureResult(secondaryResult)) {
-      return `${actionText} did not really help.`
+      return `it ${clauseFor(pText, primaryLabel)} and ${clauseFor(sText, secondaryLabel)}.`
     }
-    return `${actionText} helped in one way, but not enough.`
+
+    // Fallback for unexpected result combinations.
+    return `it ${pText} with ${primaryLabel}, and it was not enough for ${secondaryLabel}.`
   }
 
   const needKey = primaryNeedKey || secondaryNeedKey
   const label = NEED_LABELS[needKey]?.toLowerCase() || needKey
   const text = makeDeltaText(needsBefore?.[needKey], needsAfter?.[needKey])
-  if (text === 'did not really help') return `${actionText} did not really help.`
-  if (text === 'made it worse') return `${actionText} made ${label} worse.`
-  return `${actionText} ${text} with ${label}.`
+  if (text === 'did not really help') return `it did not help with ${label}.`
+  if (text === 'made it worse') return `it made ${label} worse.`
+  return `it ${text} with ${label}.`
+}
+
+function buildFeltOutcomeLine(actionId, primaryNeedKey, secondaryNeedKey, primaryResult, secondaryResult, needsBefore, needsAfter) {
+  const actionLabel = getActionLabel(actionId) || actionId || 'that'
+  const actionText = actionLabel.charAt(0).toUpperCase() + actionLabel.slice(1)
+  const tail = buildFeltOutcomeTail(
+    primaryNeedKey,
+    secondaryNeedKey,
+    primaryResult,
+    secondaryResult,
+    needsBefore,
+    needsAfter
+  )
+  const rest = tail.startsWith('it ') ? tail.slice(3) : tail
+  return `${actionText} ${rest}`
 }
 
 let engineSingleton = null
@@ -442,6 +476,10 @@ export function getCharacterEngine() {
       const px = room.player.x
       const py = room.player.y
       const ids = getActionIdsInCardinalSector(cardinal, px, py, room.mapX, room.mapY, ROOM_OBJECTS)
+      if (typeof room.setDirectionalPullHighlights === 'function') {
+        const objectTypeIds = [...new Set(ids.map((id) => ACTIONS[id]?.objectTypeId).filter(Boolean).map(String))]
+        room.setDirectionalPullHighlights(objectTypeIds)
+      }
       this._pendingSalientActionIds = [...ids]
       const lv = getCharacterState().consciousnessLevel
       if (lv > 0) {
@@ -706,8 +744,11 @@ export function getCharacterEngine() {
       this._decisionInFlight = true
       try {
         let actionId = null
+        let usedLLM = false
+        let availableActionsForDecision = null
         try {
           const allowedActions = this.getAvailableActionIdsForDecision()
+          availableActionsForDecision = allowedActions
           actionId = await this.chooseNextActionAsync({
             playerSignal: null,
             playerSignalNote: note,
@@ -719,8 +760,11 @@ export function getCharacterEngine() {
             loopHint,
             patternSummaries: this._recentPatternSummaries.slice(-2)
           })
+          usedLLM = true
         } catch (e) {
           actionId = pickUniformRandomActionId(this.getAvailableActionIdsForDecision())
+          availableActionsForDecision = this.getAvailableActionIdsForDecision()
+          usedLLM = false
           this.setReasoningFromDecision({
             action: actionId,
             thought: '',
@@ -731,11 +775,38 @@ export function getCharacterEngine() {
         if (actionId) {
           this._activeActionDecision = this._lastLLMDecision
 
+          // Apply player-signal awareness bump/penalty at decision time.
+          const hasAnySalientActions =
+            usedLLM &&
+            Array.isArray(salientActionIds) &&
+            salientActionIds.some((id) => availableActionsForDecision?.includes(String(id)))
+          const decisionForAwareness = this._lastLLMDecision
+          const revertAwarenessSnapshot = hasAnySalientActions && decisionForAwareness
+            ? {
+                baselineAwareness: this.baselineAwareness,
+                awarenessDynamicBuffer: this.awarenessDynamicBuffer,
+                awareness: this.awareness,
+                awarenessFinalSmoothed: this._awarenessFinalSmoothed
+              }
+            : null
+          if (hasAnySalientActions && decisionForAwareness) {
+            this._applyPlayerSignalDynamicAwarenessOnDecision(decisionForAwareness)
+            this.emitRoomUiImmediate()
+          }
+
           this._recentActionIds.push(actionId)
           if (this._recentActionIds.length > 20) this._recentActionIds = this._recentActionIds.slice(-20)
 
           const started = this.scene.executeAction(actionId)
           if (!started) {
+            if (revertAwarenessSnapshot) {
+              this.baselineAwareness = revertAwarenessSnapshot.baselineAwareness
+              this.awarenessDynamicBuffer = revertAwarenessSnapshot.awarenessDynamicBuffer
+              this.awareness = revertAwarenessSnapshot.awareness
+              this._awarenessFinalSmoothed = revertAwarenessSnapshot.awarenessFinalSmoothed
+              this.refreshAwarenessStates()
+              this.emitRoomUiImmediate()
+            }
             this._activeActionDecision = null
             this._activeActionReasonText = ''
           }
@@ -807,7 +878,8 @@ export function getCharacterEngine() {
     },
 
     /**
-     * First dynamic layer: `decision_factors.mode` only, scaled by baseline/50. Outcome-agnostic.
+     * Dynamic awareness layer: `decision_factors.mode` only, scaled by baseline/50.
+     * Outcome-agnostic.
      * @returns {object} debug fields for logging
      */
     _applyModeDynamicAwarenessOnActionComplete(decision, needsAfter) {
@@ -815,6 +887,8 @@ export function getCharacterEngine() {
       const baselineForScale = breakdown.baselineAwareness
       const prevDynamic = Number(this.awarenessDynamicBuffer)
       const prevSafe = Number.isFinite(prevDynamic) ? prevDynamic : 0
+
+      const baselineScale = baselineForScale / BASELINE_AWARENESS_MAX
 
       const rawMode = decision?.decision_factors?.mode
       const mode = typeof rawMode === 'string' ? rawMode.trim() : null
@@ -827,7 +901,7 @@ export function getCharacterEngine() {
           mode: mode || null,
           baseModeDelta: null,
           baselineAwarenessAtApply: baselineForScale,
-          baselineScale: baselineForScale / BASELINE_AWARENESS_MAX,
+          baselineScale,
           scaledModeDelta: null,
           prevDynamicAwareness: prevSafe,
           newDynamicAwareness: this.awarenessDynamicBuffer,
@@ -836,10 +910,8 @@ export function getCharacterEngine() {
         }
       }
 
-      const baselineScale = baselineForScale / BASELINE_AWARENESS_MAX
       const scaledDelta = scaleModeDeltaByBaseline(baseDelta, baselineForScale)
-      const nextDynamic = buildClamp(prevSafe + scaledDelta, 0, baselineForScale)
-      this.awarenessDynamicBuffer = nextDynamic
+      this.awarenessDynamicBuffer = buildClamp(prevSafe + scaledDelta, 0, baselineForScale)
 
       return {
         modeApplied: true,
@@ -849,8 +921,51 @@ export function getCharacterEngine() {
         baselineScale,
         scaledModeDelta: scaledDelta,
         prevDynamicAwareness: prevSafe,
-        newDynamicAwareness: nextDynamic,
-        finalAwarenessInstant: baselineForScale + nextDynamic
+        newDynamicAwareness: this.awarenessDynamicBuffer,
+        finalAwarenessInstant: baselineForScale + this.awarenessDynamicBuffer
+      }
+    },
+
+    /**
+     * Player-signal awareness bump is applied at decision time.
+     * (Only call this when there were any '*' actions in the prompt.)
+     * @returns {object|null} debug fields for logging
+     */
+    _applyPlayerSignalDynamicAwarenessOnDecision(decision) {
+      const rawPlayerSignalUsed = decision?.decision_factors?.player_signal_used
+      if (typeof rawPlayerSignalUsed !== 'boolean') return null
+
+      const needsNow = this.needsState.getNeeds()
+      const breakdown = computeBaselineAwarenessBreakdown(needsNow)
+      const baselineForScale = breakdown.baselineAwareness
+      const baselineScale = baselineForScale / BASELINE_AWARENESS_MAX
+
+      const delta =
+        (rawPlayerSignalUsed ? PLAYER_SIGNAL_USED_AWARENESS_BONUS : PLAYER_SIGNAL_IGNORED_AWARENESS_PENALTY) *
+        baselineScale
+
+      const prevDynamic = Number(this.awarenessDynamicBuffer)
+      const prevSafe = Number.isFinite(prevDynamic) ? prevDynamic : 0
+      const nextDynamic = buildClamp(prevSafe + delta, 0, baselineForScale)
+
+      this.baselineAwareness = baselineForScale
+      this.awarenessDynamicBuffer = nextDynamic
+
+      // Snap the displayed meter to the decision-time bump.
+      const targetFinal = buildClamp(this.baselineAwareness + this.awarenessDynamicBuffer, 0, 100)
+      this._awarenessFinalSmoothed = targetFinal
+      this.awareness = buildClamp(this._awarenessFinalSmoothed, AWARENESS_METER_MIN, AWARENESS_METER_MAX)
+      this.refreshAwarenessStates()
+
+      return {
+        playerSignalApplied: true,
+        playerSignalUsed: rawPlayerSignalUsed,
+        playerSignalDelta: delta,
+        baselineAwarenessAtApply: baselineForScale,
+        baselineScale,
+        prevDynamicAwareness: prevSafe,
+        newDynamicAwareness: this.awarenessDynamicBuffer,
+        finalAwarenessInstant: targetFinal
       }
     },
 
@@ -1043,7 +1158,7 @@ export function getCharacterEngine() {
 
       // Sleep partially recovers habituation sensitivity.
       const sleepHabituationRecovery = []
-      if (actionId === 'go_back_to_sleep') {
+      if (actionId === 'go_to_sleep') {
         for (const [counterKey, count] of Object.entries(this.habituationCounters)) {
           const n = Number(count)
           if (!Number.isFinite(n) || n <= 0) continue
@@ -1111,6 +1226,14 @@ export function getCharacterEngine() {
           evalCtx.needsBefore,
           needsAfter
         )
+        const feltOutcomeForPrompt = buildFeltOutcomeTail(
+          evalCtx.primary,
+          evalCtx.secondary,
+          primaryResult,
+          secondaryResult,
+          evalCtx.needsBefore,
+          needsAfter
+        )
 
         const postActionEvaluation = {
           actionId,
@@ -1125,8 +1248,8 @@ export function getCharacterEngine() {
         }
 
         this._lastPostActionEvaluation = postActionEvaluation
-        this._pendingFeltOutcomeLine = feltOutcome
-        this._recentFeltOutcomeLines.push(feltOutcome)
+        this._pendingFeltOutcomeLine = feltOutcomeForPrompt
+        this._recentFeltOutcomeLines.push(feltOutcomeForPrompt)
         if (this._recentFeltOutcomeLines.length > RECENT_FELT_OUTCOMES_MAX) {
           this._recentFeltOutcomeLines = this._recentFeltOutcomeLines.slice(-RECENT_FELT_OUTCOMES_MAX)
         }
@@ -1280,7 +1403,7 @@ export function getCharacterEngine() {
         const userMsg = Array.isArray(d.messages) ? d.messages.find((m) => m.role === 'user') : null
 
         if (LOG_LLM_PROMPT_BROWSER && Array.isArray(d.messages)) {
-          console.log('%c[llm] → system prompt', 'font-weight:bold', '\n', systemMsg?.content ?? '')
+          // console.log('%c[llm] → system prompt', 'font-weight:bold', '\n', systemMsg?.content ?? '')
           console.log('%c[llm] → user message', 'font-weight:bold', '\n', userMsg?.content ?? '')
         }
         if (LOG_LLM_DECISION_DEBUG) {

@@ -69,6 +69,7 @@ export class Room extends Phaser.Scene {
     this.drawRoomBackground()
     this.drawBorders()
     this.drawObjects()
+    this._directionalPullHighlightObjectTypeIds = new Set()
     this.initPlayer()
 
     this.characterEngine = getCharacterEngine()
@@ -328,6 +329,31 @@ export class Room extends Phaser.Scene {
     }
   }
 
+  setDirectionalPullHighlights(objectTypeIds) {
+    this.clearDirectionalPullHighlights()
+    if (!Array.isArray(objectTypeIds) || !this.objects) return
+
+    const YELLOW = 0xffe066
+    for (const rawId of objectTypeIds) {
+      const objectTypeId = String(rawId)
+      const entry = this.objects[objectTypeId]
+      if (!entry?.graphic) continue
+      entry.graphic.setStrokeStyle(3, YELLOW, 0.85)
+      this._directionalPullHighlightObjectTypeIds.add(objectTypeId)
+    }
+  }
+
+  clearDirectionalPullHighlights() {
+    if (!this._directionalPullHighlightObjectTypeIds?.size || !this.objects) return
+
+    for (const objectTypeId of this._directionalPullHighlightObjectTypeIds) {
+      const entry = this.objects[objectTypeId]
+      if (!entry?.graphic) continue
+      entry.graphic.setStrokeStyle(2, OBJECT_STROKE, 1)
+    }
+    this._directionalPullHighlightObjectTypeIds.clear()
+  }
+
   /**
    * Brief visual feedback when Intuition Pulse finds no hidden depth on this object.
    * @param {string} objectTypeId
@@ -554,6 +580,7 @@ export class Room extends Phaser.Scene {
   }
 
   playInteractionState(actionId) {
+    this.clearDirectionalPullHighlights()
     this.player.setTint(0x8ba8e8)
     this.player.setScale(1.08)
     const config = ACTIONS[actionId]

@@ -13,10 +13,10 @@ export const ACTIONS = {
     habituationRate: 0.70,
     habituationNeeds: ['boredom', 'loneliness']
   },
-  go_back_to_sleep: {
+  go_to_sleep: {
     objectTypeId: 'bed',
     durationMs: 75000,
-    label: 'go back to sleep',
+    label: 'go to sleep',
     loopReinforcing: false,
     repetitionRisk: 'medium',
     avoidancePositive: true,
@@ -128,4 +128,31 @@ export const INTERACTION_DURATION = 800
 export function getActionLabel(actionId) {
   const a = ACTIONS[actionId]
   return a ? a.label : actionId.replace(/_/g, ' ')
+}
+
+/** Past-tense first verb for activity diary lines (e.g. "watch TV" → "watched TV"). */
+const IRREGULAR_PAST_VERB = {
+  go: 'went',
+  get: 'got',
+  sit: 'sat',
+  take: 'took',
+  read: 'read',
+}
+
+export function imperativeLabelToPastPhrase(imperativeLabel) {
+  const s = String(imperativeLabel || '').trim()
+  if (!s) return s
+  const parts = s.split(/\s+/)
+  const firstRaw = parts[0]
+  const first = firstRaw.toLowerCase()
+  const rest = parts.slice(1)
+  let past = IRREGULAR_PAST_VERB[first]
+  if (!past) {
+    past = first.endsWith('e') ? `${first}d` : `${first}ed`
+  }
+  return [past, ...rest].join(' ')
+}
+
+export function getActionPastPhrase(actionId) {
+  return imperativeLabelToPastPhrase(getActionLabel(actionId))
 }

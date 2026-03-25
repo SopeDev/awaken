@@ -1,6 +1,5 @@
 import { EventBus } from '../../eventBus.js'
 import { createNeedsState, NEED_KEYS, ACTION_EFFECTS, INITIAL_NEEDS } from '../needs/index.js'
-import { createEntropyState, updateEntropyFromNeeds } from '../entropy/index.js'
 import { exampleChart1, generateTraitSheet, generateTraitSheetDetailed } from '../cosmicBlueprint/index.js'
 import { NEED_LABELS } from '../needs/ui.js'
 import {
@@ -22,12 +21,11 @@ import {
   findMatchingDiscoveryStep,
   getRoomDiscoveryChain
 } from '../../data/roomDiscovery.js'
-import { getCharacterState, setConsciousnessLevel } from './characterState.js'
+import { getCharacterState } from './characterState.js'
 import {
   AVATAR_PHASE,
   DIRECTIONAL_PULL_COOLDOWN_MS,
   INTUITION_PULSE_COOLDOWN_MS,
-  SYNCHRONICITY_AWARENESS_BASE,
   SYNCHRONICITY_COOLDOWN_MS,
   SYNCHRONICITY_NOTICE_BASE_CHANCE,
   SYNCHRONICITY_NOTICE_BOREDOM_THRESHOLD,
@@ -48,6 +46,12 @@ import {
   objectTypeHasHiddenDepth
 } from '../playerSignals/objectAttunement.js'
 import { getSynchronicityNoteForAction } from '../playerSignals/synchronicityCopy.js'
+import {
+  BASELINE_AWARENESS_MAX,
+  computeBaselineAwarenessBreakdown,
+  getBaseModeAwarenessDelta,
+  scaleModeDeltaByBaseline
+} from '../awareness/index.js'
 
 const GAME_MINUTES_PER_REAL_SECOND = 1 / 60
 // Base multiplier is 1. Game speed is controlled at runtime via Phaser `timeScale`.
@@ -57,81 +61,18 @@ const LOG_LLM_DECISION_DEBUG = false
 /** Log system + user messages in the browser when the server includes `_llmDebug` (see `LOG_LLM_IO`). */
 const LOG_LLM_PROMPT_BROWSER =
   import.meta.env.VITE_LOG_LLM_PROMPT !== 'false'
-const DEBUG_AWARENESS_CHANGES = true
+const DEBUG_AWARENESS_CHANGES = false
 const DEBUG_AWARENESS_CHANGES_JSON = true
 
-const AWARENESS_MIN = 0
-const AWARENESS_MAX = 100
-const AWARENESS_START = 50
+/** Smoothed HUD meter: final awareness = baseline (0–50) + dynamic buffer (0–baseline), max 100. */
+const AWARENESS_METER_MIN = 0
+const AWARENESS_METER_MAX = 100
+/** On final 0–100 meter (baseline + dynamic). */
+const AWARENESS_ENTRAPMENT_THRESHOLD = 20
+const AWARENESS_CLARITY_THRESHOLD = 80
+/** Seconds-like smoothing; higher = snappier toward target baseline. */
+const BASELINE_AWARENESS_SMOOTH_TAU_MS = 180
 
-// Applied to *fills* only. Drain rate does not scale by level.
-const METER_FILL_MULTIPLIER_BY_LEVEL = {
-  0: 2.0,
-  1: 1.5,
-  2: 1.0,
-  3: 0.6,
-  4: 0.3,
-  5: 0.15
-}
-
-// Point drains / fills (intentionally “game-y”, not physics-true).
-const FILL_BASES = {
-  pattern_noticed: 6,
-  signal_response: 8,
-  guidance: 10,
-  state: 12,
-  broke_loop: 3.5
-}
-
-const REPETITION_DRAIN_POINTS_BY_STREAK_LEN = {
-  2: 2,
-  3: 5,
-  4: 10,
-  5: 15
-}
-const REPETITION_RISK_MULTIPLIER_BY_LEVEL = {
-  high: 1.5,
-  medium: 1.0,
-  low: 0.6
-}
-const SOFT_REPEAT_PENALTY_MULTIPLIER = 0.5
-const BROKE_LOOP_MIN_STREAK = 3
-
-const AVOIDANCE_DRAIN_POINTS = 2
-
-// Awareness drain derived from hidden entropy pressure.
-const ARCHON_DRAIN_POINTS_PER_MINUTE_AT_FULL = 2.0
-const CRITICAL_ARCHON_DRAIN_MULTIPLIER_MAX = 2.2
-
-// Stagnation drain (slow, time-based).
-const STAGNATION_MS = 60 * 1000
-const STAGNATION_UNIQUE_ACTIONS_MAX = 3
-const STAGNATION_GRACE_AFTER_POSITIVE_MS = 20 * 1000
-const STAGNATION_DRAIN_POINTS_PER_MINUTE = 0.6
-
-const REGRESSION_WINDOW_MS_BY_LEVEL = {
-  1: 9000,
-  2: 12000,
-  3: 16000,
-  4: 22000,
-  5: 26000
-}
-
-const NEED_RESOLUTION_MIN_NEED = 75
-const NEED_RESOLUTION_COOLDOWN_DECISIONS = 5
-const PSYCHOLOGICAL_NEED_KEYS = ['boredom', 'stress', 'loneliness']
-const AVOIDANCE_KEYWORDS = [
-  'avoid',
-  'escape',
-  'dodge',
-  'relief',
-  'numb',
-  'shut off',
-  'get away',
-  'run away',
-  'not face',
-  "can't face"
-]
 const NEED_RESULT_HELPED_A_LOT = 'helped_a_lot'
 const NEED_RESULT_HELPED_A_LITTLE = 'helped_a_little'
 const NEED_RESULT_NO_MEANINGFUL_HELP = 'no_meaningful_help'
@@ -147,12 +88,6 @@ const buildClamp = (v, min, max) => Math.max(min, Math.min(max, v))
 const getHabituationCounterKey = (actionId, needKey) => `${actionId}:${needKey}`
 const RECENT_FELT_OUTCOMES_MAX = 12
 const RECENT_PATTERN_SUMMARIES_MAX = 8
-
-function isAvoidanceReasonText(reasonText) {
-  const t = String(reasonText || '').toLowerCase()
-  if (!t) return false
-  return AVOIDANCE_KEYWORDS.some((kw) => t.includes(String(kw).toLowerCase()))
-}
 
 function buildRealWorldTimestamp(sessionStartedAtMs) {
   const nowMs = Date.now()
@@ -292,25 +227,6 @@ function buildFeltOutcomeLine(actionId, primaryNeedKey, secondaryNeedKey, primar
   return `${actionText} ${text} with ${label}.`
 }
 
-export function getPsychologicalFillMultiplier(needs, consciousnessLevel) {
-  const boredom = Number(needs?.boredom ?? 0)
-  const stress = Number(needs?.stress ?? 0)
-  const loneliness = Number(needs?.loneliness ?? 0)
-
-  let multiplier = 1
-  if (boredom > 80 && stress > 80) multiplier = 0
-  else if (boredom > 80 || stress > 80) multiplier = 0.3
-  else if (boredom > 65 || stress > 65) multiplier = 0.6
-
-  if (consciousnessLevel >= 2) {
-    if (loneliness > 90) multiplier *= 0.75
-    else if (loneliness > 75) multiplier *= 0.85
-    else if (loneliness > 60) multiplier *= 0.95
-  }
-
-  return buildClamp(multiplier, 0, 1)
-}
-
 let engineSingleton = null
 
 export function getCharacterEngine() {
@@ -331,21 +247,22 @@ export function getCharacterEngine() {
     pendingNeedTotalDeltas: {},
     pendingNeedChangeTotalMs: null,
 
-    entropyState: createEntropyState(),
+    /**
+     * Baseline: needs-derived foundation (0–50). Dynamic: mode-driven buffer, clamped [0, baseline].
+     * Final (instant) = baseline + dynamic ∈ [baseline, 2×baseline]; HUD uses smoothed final (0–100).
+     */
+    baselineAwareness: 0,
+    awarenessDynamicBuffer: 0,
+    /** Smoothed final awareness for HUD (0–100). */
+    awareness: 0,
+    /** Lerp target = baselineAwareness + awarenessDynamicBuffer (single needle, coherent with bands). */
+    _awarenessFinalSmoothed: null,
+    _lastBaselineBreakdown: null,
+    _lastLoggedAwarenessMeter: null,
+    isEntrapped: false,
+    isClear: false,
 
-    // Awareness per consciousness level.
-    awarenessByLevel: Array.from({ length: 6 }, () => AWARENESS_START),
-    awareness: AWARENESS_START,
-    isCriticalState: false,
-    _criticalStartedAtMs: null,
-
-    // Repetition/stagnation memory.
-    _lastCompletedActionId: null,
-    _repeatStreakLen: 0,
-    _executedActionHistory: [],
-    _lastPositiveAwarenessAtMs: Date.now(),
     _completedDecisionCount: 0,
-    _needResolutionLastDecisionByNeed: {},
 
     // Per-action context captured when the action is chosen.
     _activeActionDecision: null,
@@ -738,33 +655,6 @@ export function getCharacterEngine() {
         this._clearAttunementAfterSuccessfulDeepSync(objectTypeId)
       }
 
-      const lv = level
-      const meterFill = METER_FILL_MULTIPLIER_BY_LEVEL[lv] ?? 1.0
-      const psych = getPsychologicalFillMultiplier(this.needsState.getNeeds(), lv)
-      const delta = SYNCHRONICITY_AWARENESS_BASE * meterFill * psych
-      this.applyAwarenessDelta(delta)
-      console.log('[awareness-signal]', JSON.stringify({
-        label: 'synchronicity_noticed',
-        delta,
-        actionId
-      }))
-
-      if (this.awareness >= AWARENESS_MAX && getCharacterState().consciousnessLevel < 5) {
-        const from = getCharacterState().consciousnessLevel
-        const awarenessAtTrigger = this.awareness
-        this.levelUp()
-        if (DEBUG_AWARENESS_CHANGES) {
-          console.log('[consciousness]', {
-            type: 'levelUp',
-            actionId: 'synchronicity',
-            from,
-            to: getCharacterState().consciousnessLevel,
-            awarenessAtTrigger,
-            resetAwareness: this.awareness
-          })
-        }
-      }
-
       this._setPendingPlayerNote(noteMsg)
 
       // Only star actions when synchronicity unlocked them for the first time.
@@ -870,6 +760,13 @@ export function getCharacterEngine() {
         needs: { ...needs },
         pendingNeedDeltas: { ...this.pendingNeedDeltas },
         awareness: this.awareness,
+        awarenessBaseline: this.baselineAwareness,
+        awarenessDynamicBuffer: this.awarenessDynamicBuffer,
+        awarenessModel: 'baseline_plus_mode_dynamic_v1',
+        awarenessStates: {
+          entrapped: this.isEntrapped,
+          clear: this.isClear
+        },
         traits: this.defaultTraits ? { ...this.defaultTraits } : {},
         reasoningText: this._reasoningLog.length
           ? this._reasoningLog.join(REASONING_LOG_SEPARATOR)
@@ -903,135 +800,102 @@ export function getCharacterEngine() {
       this._emitRoomUiState()
     },
 
-    getRegressionWindowMs(level) {
-      return REGRESSION_WINDOW_MS_BY_LEVEL[level] || REGRESSION_WINDOW_MS_BY_LEVEL[1] || 9000
+    refreshAwarenessStates() {
+      const a = buildClamp(this.awareness, AWARENESS_METER_MIN, AWARENESS_METER_MAX)
+      this.isEntrapped = a <= AWARENESS_ENTRAPMENT_THRESHOLD
+      this.isClear = a >= AWARENESS_CLARITY_THRESHOLD
     },
 
-    meterFillMultiplier() {
-      const level = getCharacterState().consciousnessLevel
-      return METER_FILL_MULTIPLIER_BY_LEVEL[level] ?? 1.0
-    },
+    /**
+     * First dynamic layer: `decision_factors.mode` only, scaled by baseline/50. Outcome-agnostic.
+     * @returns {object} debug fields for logging
+     */
+    _applyModeDynamicAwarenessOnActionComplete(decision, needsAfter) {
+      const breakdown = computeBaselineAwarenessBreakdown(needsAfter)
+      const baselineForScale = breakdown.baselineAwareness
+      const prevDynamic = Number(this.awarenessDynamicBuffer)
+      const prevSafe = Number.isFinite(prevDynamic) ? prevDynamic : 0
 
-    setAwarenessMeterForCurrentLevel(nextValue) {
-      const clamped = buildClamp(nextValue, AWARENESS_MIN, AWARENESS_MAX)
-      const level = getCharacterState().consciousnessLevel
-      this.awarenessByLevel[level] = clamped
-      this.awareness = clamped
-    },
+      const rawMode = decision?.decision_factors?.mode
+      const mode = typeof rawMode === 'string' ? rawMode.trim() : null
+      const baseDelta = mode ? getBaseModeAwarenessDelta(mode) : null
 
-    enterCriticalStateIfNeeded() {
-      if (this.isCriticalState) return
-      this.isCriticalState = true
-      this._criticalStartedAtMs = this.scene ? this.scene.time.now : Date.now()
-    },
-
-    exitCriticalState() {
-      if (!this.isCriticalState) return
-      this.isCriticalState = false
-      this._criticalStartedAtMs = null
-    },
-
-    applyAwarenessDelta(deltaPoints) {
-      if (typeof deltaPoints !== 'number' || !Number.isFinite(deltaPoints) || deltaPoints === 0) return
-
-      const prevAwareness = this.awareness
-      this.setAwarenessMeterForCurrentLevel(prevAwareness + deltaPoints)
-
-      if (prevAwareness > AWARENESS_MIN && this.awareness <= AWARENESS_MIN) {
-        this.enterCriticalStateIfNeeded()
-        if (DEBUG_AWARENESS_CHANGES) {
-          console.log('[awareness]', {
-            type: 'critical_enter',
-            level: getCharacterState().consciousnessLevel,
-            prevAwareness,
-            nextAwareness: this.awareness,
-            deltaPoints: deltaPoints
-          })
+      if (baseDelta == null) {
+        this.awarenessDynamicBuffer = buildClamp(prevSafe, 0, baselineForScale)
+        return {
+          modeApplied: false,
+          mode: mode || null,
+          baseModeDelta: null,
+          baselineAwarenessAtApply: baselineForScale,
+          baselineScale: baselineForScale / BASELINE_AWARENESS_MAX,
+          scaledModeDelta: null,
+          prevDynamicAwareness: prevSafe,
+          newDynamicAwareness: this.awarenessDynamicBuffer,
+          finalAwarenessInstant: baselineForScale + this.awarenessDynamicBuffer,
+          skipReason: !mode ? 'missing_mode' : 'mode_not_in_mode_delta_table'
         }
-      } else if (prevAwareness <= AWARENESS_MIN && this.awareness > AWARENESS_MIN) {
-        this.exitCriticalState()
-        if (DEBUG_AWARENESS_CHANGES) {
-          console.log('[awareness]', {
-            type: 'critical_exit',
-            level: getCharacterState().consciousnessLevel,
-            prevAwareness,
-            nextAwareness: this.awareness,
-            deltaPoints: deltaPoints
-          })
-        }
+      }
+
+      const baselineScale = baselineForScale / BASELINE_AWARENESS_MAX
+      const scaledDelta = scaleModeDeltaByBaseline(baseDelta, baselineForScale)
+      const nextDynamic = buildClamp(prevSafe + scaledDelta, 0, baselineForScale)
+      this.awarenessDynamicBuffer = nextDynamic
+
+      return {
+        modeApplied: true,
+        mode,
+        baseModeDelta: baseDelta,
+        baselineAwarenessAtApply: baselineForScale,
+        baselineScale,
+        scaledModeDelta: scaledDelta,
+        prevDynamicAwareness: prevSafe,
+        newDynamicAwareness: nextDynamic,
+        finalAwarenessInstant: baselineForScale + nextDynamic
       }
     },
 
-    checkCriticalRegression() {
-      if (!this.isCriticalState) return
-      if (this.awareness > AWARENESS_MIN) return
-      if (this._criticalStartedAtMs == null) return
+    /**
+     * Recompute needs-derived baseline (0–50), optional exponential smoothing toward target for HUD.
+     * @param {number} deltaMs - frame delta; <= 0 snaps smoothed value to target (init / large jumps).
+     */
+    syncBaselineAwarenessFromNeeds(deltaMs) {
+      const needs = this.needsState.getNeeds()
+      const breakdown = computeBaselineAwarenessBreakdown(needs)
+      this._lastBaselineBreakdown = breakdown
+      const target = breakdown.baselineAwareness
+      this.baselineAwareness = target
 
-      const level = getCharacterState().consciousnessLevel
-      const elapsed = (this.scene ? this.scene.time.now : Date.now()) - this._criticalStartedAtMs
-      const windowMs = this.getRegressionWindowMs(level)
-      if (elapsed < windowMs) return
+      const dyn = Number(this.awarenessDynamicBuffer)
+      this.awarenessDynamicBuffer = buildClamp(Number.isFinite(dyn) ? dyn : 0, 0, target)
 
-      if (level <= 0) {
-        // Level 0 never regresses; remain critical until meter recovers.
-        this._criticalStartedAtMs = (this.scene ? this.scene.time.now : Date.now())
-        return
+      const targetFinal = buildClamp(this.baselineAwareness + this.awarenessDynamicBuffer, 0, 100)
+
+      if (this._awarenessFinalSmoothed == null || !Number.isFinite(this._awarenessFinalSmoothed)) {
+        this._awarenessFinalSmoothed = targetFinal
+      } else if (deltaMs <= 0) {
+        this._awarenessFinalSmoothed = targetFinal
+      } else {
+        const t = 1 - Math.exp(-deltaMs / BASELINE_AWARENESS_SMOOTH_TAU_MS)
+        this._awarenessFinalSmoothed += (targetFinal - this._awarenessFinalSmoothed) * t
       }
 
-      if (DEBUG_AWARENESS_CHANGES) {
-        console.log('[consciousness]', {
-          type: 'levelDown',
-          from: level,
-          to: level - 1,
-          elapsedMs: Math.round(elapsed),
-          windowMs: windowMs
+      this.awareness = buildClamp(this._awarenessFinalSmoothed, AWARENESS_METER_MIN, AWARENESS_METER_MAX)
+      this.refreshAwarenessStates()
+
+      const logStep = Math.round(this.awareness * 10) / 10
+      if (DEBUG_AWARENESS_CHANGES && logStep !== this._lastLoggedAwarenessMeter) {
+        this._lastLoggedAwarenessMeter = logStep
+        console.log('[awareness]', {
+          type: 'awareness_recompute',
+          model: 'baseline_plus_mode_dynamic_v1',
+          baselineAwareness: this.baselineAwareness,
+          awarenessDynamicBuffer: this.awarenessDynamicBuffer,
+          finalAwarenessSmoothed: this.awareness,
+          weightedBurden: breakdown.weightedBurden,
+          maxWeightedBurden: breakdown.maxWeightedBurden,
+          burdenRatio: breakdown.burdenRatio
         })
       }
-      this.levelDown()
-    },
-
-    resetLoopTracking() {
-      this._lastCompletedActionId = null
-      this._repeatStreakLen = 0
-      this._executedActionHistory = []
-      this._lastPositiveAwarenessAtMs = (this.scene ? this.scene.time.now : Date.now())
-    },
-
-    levelUp() {
-      const level = getCharacterState().consciousnessLevel
-      if (level >= 5) {
-        this.setAwarenessMeterForCurrentLevel(AWARENESS_MAX)
-        return
-      }
-
-      const nextLevel = level + 1
-      setConsciousnessLevel(nextLevel)
-
-      this.isCriticalState = false
-      this._criticalStartedAtMs = null
-
-      this.awarenessByLevel[nextLevel] = AWARENESS_START
-      this.awareness = AWARENESS_START
-      this.resetLoopTracking()
-
-      this._suppressAIUntilMs = this.scene ? this.scene.time.now + 1000 : Date.now() + 1000
-    },
-
-    levelDown() {
-      const level = getCharacterState().consciousnessLevel
-      if (level <= 0) return
-
-      const nextLevel = level - 1
-      setConsciousnessLevel(nextLevel)
-
-      this.isCriticalState = false
-      this._criticalStartedAtMs = null
-
-      this.awarenessByLevel[nextLevel] = AWARENESS_START
-      this.awareness = AWARENESS_START
-      this.resetLoopTracking()
-
-      this._suppressAIUntilMs = this.scene ? this.scene.time.now + 1000 : Date.now() + 1000
     },
 
     applyPendingNeedDeltas(deltaMs) {
@@ -1191,19 +1055,10 @@ export function getCharacterEngine() {
         }
       }
 
-      // Apply awareness fills/drains based on the stored decision + need snapshots.
       const levelAtAction = getCharacterState().consciousnessLevel
-      const meterFillMultiplier = METER_FILL_MULTIPLIER_BY_LEVEL[levelAtAction] ?? 1.0
-      const awarenessBefore = this.awareness
-      const actionMeta = ACTIONS[actionId] || {}
-      const repetitionRisk = String(actionMeta.repetitionRisk || 'medium').toLowerCase()
-      const repetitionRiskMultiplier = REPETITION_RISK_MULTIPLIER_BY_LEVEL[repetitionRisk] ?? REPETITION_RISK_MULTIPLIER_BY_LEVEL.medium
-
       const decision = this._activeActionDecision
-      const reasonText = (decision && decision.reason) ? decision.reason : this._activeActionReasonText
       const needsBefore = this._activeActionNeedsSnapshot
       const needsAfter = this.needsState.getNeeds()
-      const psychologicalFillMultiplier = getPsychologicalFillMultiplier(needsAfter, levelAtAction)
       const evalCtx = this._activePostActionEvaluation
 
       // Post-action felt-outcome evaluation (primary/secondary only), plus mismatch friction.
@@ -1279,66 +1134,8 @@ export function getCharacterEngine() {
         this._lastPostActionEvaluation = null
       }
 
-      let awarenessDelta = 0
-      let positiveFillPoints = 0
-      const awarenessBreakdown = []
-      const lastCompletedActionId = this._executedActionHistory[this._executedActionHistory.length - 1] || null
-      const twoBackActionId = this._executedActionHistory[this._executedActionHistory.length - 2] || null
-      const addBreakdown = (label, delta) => {
-        if (typeof delta !== 'number' || !Number.isFinite(delta) || delta === 0) return
-        awarenessBreakdown.push({ label, delta })
-      }
-      const addPositiveFill = (label, rawFill) => {
-        if (typeof rawFill !== 'number' || !Number.isFinite(rawFill) || rawFill <= 0) return
-        const adjusted = rawFill * psychologicalFillMultiplier
-        if (adjusted <= 0) return
-        awarenessDelta += adjusted
-        positiveFillPoints += adjusted
-        addBreakdown(label, adjusted)
-      }
-
-      // Repetition penalty (starts on 3rd consecutive same action, not 2nd).
-      if (actionId === this._lastCompletedActionId) {
-        this._repeatStreakLen += 1
-        const streakLen = this._repeatStreakLen
-        if (streakLen >= 3) {
-          const tierKey = Math.min(streakLen - 1, 5)
-          const penaltyBase = REPETITION_DRAIN_POINTS_BY_STREAK_LEN[tierKey] || 15
-          const penalty = penaltyBase * repetitionRiskMultiplier
-          const delta = -penalty
-          awarenessDelta += delta
-          addBreakdown('repetition_penalty', delta)
-        }
-      } else {
-        const endedStreak = this._repeatStreakLen
-        this._repeatStreakLen = 1
-        this._lastCompletedActionId = actionId
-        if (endedStreak >= BROKE_LOOP_MIN_STREAK) {
-          const fill = FILL_BASES.broke_loop * meterFillMultiplier
-          addPositiveFill('broke_loop', fill)
-        }
-
-        // Soft repetition: A -> B -> A gets half of the streak-2 repetition penalty.
-        // This catches quick bounce-backs without treating them as full loops.
-        if (actionId !== lastCompletedActionId && actionId === twoBackActionId) {
-          const basePenalty = REPETITION_DRAIN_POINTS_BY_STREAK_LEN[2] || 2
-          const delta = -(basePenalty * SOFT_REPEAT_PENALTY_MULTIPLIER * repetitionRiskMultiplier)
-          awarenessDelta += delta
-          addBreakdown('soft_repeat_penalty', delta)
-        }
-      }
-
-      // Avoidance drain.
-      if (isAvoidanceReasonText(reasonText)) {
-        const delta = -AVOIDANCE_DRAIN_POINTS
-        awarenessDelta += delta
-        addBreakdown('avoidance_drain', delta)
-      }
-
-      // Insight/genuine-choice fills from structured LLM keys.
+      // Keep recent interpreted memory for higher-consciousness prompt context.
       if (decision && decision.pattern_noticed) {
-        const fill = FILL_BASES.pattern_noticed * meterFillMultiplier
-        addPositiveFill('pattern_noticed', fill)
         this._recentPatternSummaries.push(String(decision.pattern_noticed))
       }
       if (decision && decision.felt_memory) {
@@ -1347,100 +1144,30 @@ export function getCharacterEngine() {
       if (this._recentPatternSummaries.length > RECENT_PATTERN_SUMMARIES_MAX) {
         this._recentPatternSummaries = this._recentPatternSummaries.slice(-RECENT_PATTERN_SUMMARIES_MAX)
       }
-      if (decision && decision.signal_response) {
-        const fill = FILL_BASES.signal_response * meterFillMultiplier
-        addPositiveFill('signal_response', fill)
-      }
-      if (decision && decision.guidance) {
-        const fill = FILL_BASES.guidance * meterFillMultiplier
-        addPositiveFill('guidance', fill)
-      }
-      if (decision && decision.state) {
-        const fill = FILL_BASES.state * meterFillMultiplier
-        addPositiveFill('state', fill)
-      }
 
-      // Need resolution fill (heuristic).
-      if (needsBefore && needsAfter && ACTION_EFFECTS[actionId]) {
-        const fatigueBefore = needsBefore.fatigue ?? 0
-        const stressBefore = needsBefore.stress ?? 0
-        const fatigueIsHigh = fatigueBefore >= NEED_RESOLUTION_MIN_NEED
-        const stressIsDrivingSleep = stressBefore >= 65 && fatigueBefore < 50
-
-        if (actionMeta.avoidancePositive) {
-          if (stressIsDrivingSleep) {
-            const delta = -AVOIDANCE_DRAIN_POINTS
-            awarenessDelta += delta
-            addBreakdown('avoidance_positive_drain', delta)
-          } else if (!fatigueIsHigh) {
-            // Neutral outcome for avoidance-positive actions when not genuinely tired.
-            // Skip both need-resolution fill and avoidance drain.
-          }
-        }
-
-        let resolvedNeedKey = null
-        const effects = ACTION_EFFECTS[actionId]
-        const allowNeedResolutionForAction = !actionMeta.avoidancePositive || fatigueIsHigh
-        if (allowNeedResolutionForAction) {
-          for (const [needKey, delta] of Object.entries(effects)) {
-            if (!PSYCHOLOGICAL_NEED_KEYS.includes(needKey)) continue
-            if (typeof delta !== 'number') continue
-            if (delta < 0) {
-              const before = needsBefore[needKey]
-              const after = needsAfter[needKey]
-              if (before < NEED_RESOLUTION_MIN_NEED || after > before - 10) continue
-
-              const lastDecision = this._needResolutionLastDecisionByNeed[needKey]
-              const decisionGap = this._completedDecisionCount - (lastDecision ?? -99999)
-              if (decisionGap < NEED_RESOLUTION_COOLDOWN_DECISIONS) continue
-
-              resolvedNeedKey = needKey
-              break
+      const baselineBeforeBreakdown =
+        needsBefore ? computeBaselineAwarenessBreakdown(needsBefore) : null
+      const baselineAfterBreakdown = computeBaselineAwarenessBreakdown(needsAfter)
+      const serializeBaseline = (b) =>
+        b
+          ? {
+              weightedBurden: b.weightedBurden,
+              maxWeightedBurden: b.maxWeightedBurden,
+              burdenRatio: b.burdenRatio,
+              baselineAwareness: b.baselineAwareness,
+              weightedTerms: b.weightedTerms
             }
-          }
-        }
-        if (resolvedNeedKey) {
-          const fill = 3 * meterFillMultiplier
-          addPositiveFill('need_resolution', fill)
-          this._needResolutionLastDecisionByNeed[resolvedNeedKey] = this._completedDecisionCount
-        }
-      }
+          : null
 
-      this.applyAwarenessDelta(awarenessDelta)
-      const awarenessAfter = this.awareness
-
-      if (positiveFillPoints > 0) {
-        this._lastPositiveAwarenessAtMs = this.scene ? this.scene.time.now : Date.now()
-      }
-
-      // Stagnation/history for drain heuristics.
-      this._executedActionHistory.push(actionId)
-      if (this._executedActionHistory.length > 12) {
-        this._executedActionHistory = this._executedActionHistory.slice(-12)
-      }
-
-      if (this.awareness >= AWARENESS_MAX && getCharacterState().consciousnessLevel < 5) {
-        const from = getCharacterState().consciousnessLevel
-        const awarenessAtTrigger = this.awareness
-        this.levelUp()
-        const to = getCharacterState().consciousnessLevel
-        if (DEBUG_AWARENESS_CHANGES) {
-          console.log('[consciousness]', {
-            type: 'levelUp',
-            actionId,
-            from,
-            to,
-            awarenessAtTrigger,
-            resetAwareness: this.awareness
-          })
-        }
-      }
+      const modeAwarenessDebug = this._applyModeDynamicAwarenessOnActionComplete(decision, needsAfter)
+      const awarenessTickMs = Math.max(1, this.scene?.time?.delta ?? 16)
+      this.syncBaselineAwarenessFromNeeds(awarenessTickMs)
 
       if (DEBUG_AWARENESS_CHANGES) {
-        const awarenessFinal = this.awareness
         const realWorldTimestamp = buildRealWorldTimestamp(this._realSessionStartedAtMs)
         const awarenessLogPayload = {
           type: 'action_complete',
+          model: 'baseline_plus_mode_dynamic_v1',
           actionId,
           level: levelAtAction,
           llmReasoning: buildLlmReasoningPayload(decision, this._activeActionReasonText),
@@ -1450,14 +1177,21 @@ export function getCharacterEngine() {
           },
           realWorldTimestamp,
           needsAtActionStart: needsBefore ? { ...needsBefore } : null,
-          awarenessBefore,
-          awarenessAfterApply: awarenessAfter,
-          awarenessAfterFinal: awarenessFinal,
-          deltaApplied: awarenessAfter - awarenessBefore,
-          deltaFinalApplied: awarenessFinal - awarenessBefore,
-          hasAwarenessChange: awarenessAfter !== awarenessBefore,
-          psychologicalFillMultiplier,
-          breakdown: awarenessBreakdown,
+          needsAtActionEnd: { ...needsAfter },
+          baseline: {
+            needWeights: baselineAfterBreakdown.needWeights,
+            before: serializeBaseline(baselineBeforeBreakdown),
+            after: serializeBaseline(baselineAfterBreakdown)
+          },
+          modeDynamicLayer: {
+            ...modeAwarenessDebug,
+            note:
+              'Baseline from needs only; dynamic buffer from decision_factors.mode only, scaled by baselineAwareness/50'
+          },
+          baselineAwarenessInstant: this.baselineAwareness,
+          awarenessDynamicBuffer: this.awarenessDynamicBuffer,
+          finalAwarenessInstant: this.baselineAwareness + this.awarenessDynamicBuffer,
+          finalAwarenessSmoothed: this.awareness,
           postActionEvaluation: this._lastPostActionEvaluation,
           habituation: {
             details: this._activeHabituationDetails,
@@ -1469,6 +1203,8 @@ export function getCharacterEngine() {
           console.log('[awareness-json]', JSON.stringify(awarenessLogPayload))
         }
       }
+
+      this.emitRoomUiImmediate()
 
       // Clear per-action context.
       this._activeActionNeedsSnapshot = null
@@ -1540,10 +1276,11 @@ export function getCharacterEngine() {
 
       if (data._llmDebug) {
         const d = data._llmDebug
+        const systemMsg = Array.isArray(d.messages) ? d.messages.find((m) => m.role === 'system') : null
+        const userMsg = Array.isArray(d.messages) ? d.messages.find((m) => m.role === 'user') : null
+
         if (LOG_LLM_PROMPT_BROWSER && Array.isArray(d.messages)) {
-          const systemMsg = d.messages.find((m) => m.role === 'system')
-          const userMsg = d.messages.find((m) => m.role === 'user')
-          // console.log('%c[llm] → system prompt', 'font-weight:bold', '\n', systemMsg?.content ?? '')
+          console.log('%c[llm] → system prompt', 'font-weight:bold', '\n', systemMsg?.content ?? '')
           console.log('%c[llm] → user message', 'font-weight:bold', '\n', userMsg?.content ?? '')
         }
         if (LOG_LLM_DECISION_DEBUG) {
@@ -1556,6 +1293,8 @@ export function getCharacterEngine() {
             d.modelId
           )
           console.log('[llm-decision] request (game → server)', d.requestBody)
+          console.log('[llm-decision] system prompt', systemMsg?.content ?? '')
+          console.log('[llm-decision] user message', userMsg?.content ?? '')
           console.log('[llm-decision] messages to LLM', d.messages)
           console.log('[llm-decision] raw JSON from model', d.rawParsed)
           console.log('[llm-decision] normalized (server → game)', d.normalized)
@@ -1619,51 +1358,18 @@ export function getCharacterEngine() {
       // Needs drift.
       this.needsState.tick(gameMinutesDelta, this.defaultTraits, null)
 
-      // Hidden entropy pressure derived from unmet needs.
-      this.entropyState.entropy = updateEntropyFromNeeds(
-        this.needsState.getNeeds(),
-        this.entropyState.entropy,
-        gameMinutesDelta
-      )
-
-      // Awareness drain derived from hidden entropy pressure.
-      const entropyPressure = Math.max(0, Math.min(1, this.entropyState.entropy / AWARENESS_MAX))
-
-      const criticalElapsedMs = this.isCriticalState && this._criticalStartedAtMs != null
-        ? this.scene.time.now - this._criticalStartedAtMs
-        : 0
-      const criticalWindowMs = this.getRegressionWindowMs(getCharacterState().consciousnessLevel)
-      const criticalProgress01 = criticalWindowMs > 0
-        ? Math.max(0, Math.min(1, criticalElapsedMs / criticalWindowMs))
-        : 0
-
-      const criticalMultiplier = 1 + (this.isCriticalState ? CRITICAL_ARCHON_DRAIN_MULTIPLIER_MAX * criticalProgress01 : 0)
-      const archonDrainPoints = ARCHON_DRAIN_POINTS_PER_MINUTE_AT_FULL * entropyPressure * gameMinutesDelta * criticalMultiplier
-      this.applyAwarenessDelta(-archonDrainPoints)
-
-      // Stagnation drain: cycles through a small set without positive awareness fills.
-      if (this._executedActionHistory.length >= 8) {
-        const unique = new Set(this._executedActionHistory).size
-        const sincePositiveMs = this.scene.time.now - this._lastPositiveAwarenessAtMs
-        if (unique <= STAGNATION_UNIQUE_ACTIONS_MAX && sincePositiveMs > STAGNATION_MS + STAGNATION_GRACE_AFTER_POSITIVE_MS) {
-          const stagnationDrain = STAGNATION_DRAIN_POINTS_PER_MINUTE * gameMinutesDelta
-          this.applyAwarenessDelta(-stagnationDrain)
-        }
-      }
-
-      this.checkCriticalRegression()
+      // Awareness is currently placeholder-only: no passive drains/fills in update().
 
       // Gradual need resolution during actions.
       this.applyPendingNeedDeltas(deltaMs * TEST_SPEED_MULTIPLIER)
+
+      this.syncBaselineAwarenessFromNeeds(deltaMs * TEST_SPEED_MULTIPLIER)
 
       this.emitUiStateThrottled()
     }
   }
 
-  // Ensure starting awareness matches current consciousnessLevel.
-  const startLevel = getCharacterState().consciousnessLevel
-  engine.awarenessByLevel[startLevel] = AWARENESS_START
-  engine.awareness = AWARENESS_START
+  engine.syncBaselineAwarenessFromNeeds(0)
 
   engineSingleton = engine
   return engine

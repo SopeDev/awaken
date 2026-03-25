@@ -17,6 +17,8 @@ const defaultState = {
   needs: {},
   pendingNeedDeltas: {},
   awareness: 0,
+  awarenessBaseline: 0,
+  awarenessDynamicBuffer: 0,
   traits: {},
   reasoningText: 'Waiting for next decision…',
   signalCooldownsMs: { directional: 0, intuition: 0, synchronicity: 0 },
@@ -41,6 +43,9 @@ export function GameUI() {
         needs: payload.needs ?? defaultState.needs,
         pendingNeedDeltas: payload.pendingNeedDeltas ?? defaultState.pendingNeedDeltas,
         awareness: payload.awareness ?? 0,
+        awarenessBaseline: payload.awarenessBaseline ?? defaultState.awarenessBaseline,
+        awarenessDynamicBuffer:
+          payload.awarenessDynamicBuffer ?? defaultState.awarenessDynamicBuffer,
         traits: payload.traits ?? defaultState.traits,
         reasoningText: payload.reasoningText ?? defaultState.reasoningText,
         gameClockDisplay: payload.gameClockDisplay ?? defaultState.gameClockDisplay,
@@ -191,7 +196,10 @@ export function GameUI() {
           pointerEvents: 'auto'
         }}
       >
-        <AwarenessStrip awareness={state.awareness} />
+        <AwarenessStrip
+          awarenessBaseline={state.awarenessBaseline}
+          awarenessDynamicBuffer={state.awarenessDynamicBuffer}
+        />
         {portrait ? (
           <>
             <NeedsPanel

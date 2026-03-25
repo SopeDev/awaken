@@ -22,7 +22,13 @@ function formatRecentActions(ids, limit) {
   if (!ids || !ids.length) return null
   const slice = ids.slice(-limit)
   const labels = slice.map((id) => getActionLabel(id) || id)
-  return `What I have been doing: ${labels.join(', ')}`
+  return labels.join(', ')
+}
+
+function formatLastAction(ids) {
+  if (!ids || !ids.length) return null
+  const last = ids[ids.length - 1]
+  return getActionLabel(last) || String(last)
 }
 
 function formatRecentFeltOutcomes(lines, limit) {
@@ -111,20 +117,20 @@ export function buildUserPromptContent(raw) {
 
   const parts = [PLAIN_LANGUAGE_NOTE]
 
-  if (consciousnessLevel === 0) {
-    parts.push(needsDesc)
-  } else {
-    parts.push(`How I feel: ${needsDesc}`)
-  }
+  parts.push(`How I feel:\n${needsDesc}`)
 
-  if (traitsDesc) parts.push(traitsDesc)
+  if (traitsDesc) parts.push(`How I tend to be:\n${traitsDesc}`)
+  if (recent) parts.push(`What I have been doing lately:\n${recent}`)
+
+  const lastAction = formatLastAction(raw.recentActions)
+  if (lastAction) parts.push(`What I did last:\n${lastAction}`)
+
+  if (feltOutcomeLine) parts.push(`What happened:\n${feltOutcomeLine}`)
   if (playerBit) parts.push(playerBit)
-  if (feltOutcomeLine) parts.push(`What happened when I did that:\n${feltOutcomeLine}`)
   if (feltOutcomes) parts.push(feltOutcomes)
   if (loopHint) parts.push(loopHint)
   if (patternSummaries) parts.push(patternSummaries)
   if (mem) parts.push(mem)
-  if (recent) parts.push(recent)
 
   parts.push(
     formatAvailableActions(raw.availableActions, raw.salientActionIds)

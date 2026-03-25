@@ -2,8 +2,8 @@
  * Traits -> natural language for LLM, scaled by consciousness level.
  *
  * Contract:
- * - Level 0-1: return null (traits omitted from user prompt).
- * - Level 2: 2-3 plain behavioral observations only.
+ * - Level 0: return null (traits omitted from user prompt).
+ * - Level 1-2: 2-3 plain behavioral observations only.
  * - Level 3: casual conflict language (tension system, but not clinical).
  * - Level 4-5: full tension + score-band phrasing (rich current design).
  */
@@ -229,8 +229,8 @@ function buildTraitsDescriptionLevel3(scores, tensions) {
  */
 export function buildTraitsDescription(consciousnessLevel, scores, tensions) {
   const level = clampLevel(consciousnessLevel)
-  if (level <= 1) return null
-  if (level === 2) return buildTraitsDescriptionLevel2(scores, tensions)
+  if (level === 0) return null
+  if (level <= 2) return buildTraitsDescriptionLevel2(scores, tensions)
   if (level === 3) return buildTraitsDescriptionLevel3(scores, tensions)
   return buildTraitsDescriptionRich(scores, tensions)
 }

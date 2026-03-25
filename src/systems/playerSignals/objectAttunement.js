@@ -5,16 +5,6 @@
 
 import { getObjectType } from '../../data/objectTypes.js'
 
-/** Plain-language noun for first-person "something about the …" lines (object type id → phrase). */
-const INTUITION_FOCUS_PHRASE = {
-  books: 'book',
-  window: 'window',
-  phone: 'phone',
-  tv: 'TV',
-  computer: 'screen',
-  couch: 'couch'
-}
-
 /**
  * @param {string} objectTypeId
  * @returns {boolean}
@@ -45,7 +35,10 @@ export function buildIntuitionFeltLineForObjectTypes(objectTypeIds) {
   if (!ids.length) return null
 
   const phrases = ids
-    .map((id) => INTUITION_FOCUS_PHRASE[id] || id.replace(/_/g, ' '))
+    .map((id) => {
+      const t = getObjectType(id)
+      return t?.intuitionFocusPhrase || id.replace(/_/g, ' ')
+    })
     .filter(Boolean)
 
   if (!phrases.length) return null

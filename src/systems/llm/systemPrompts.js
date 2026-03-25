@@ -47,7 +47,7 @@ You can choose between habit and a truer move, and name what you are testing in 
 
 const ALLOWED_PRIMARY_SECONDARY = `["hunger","thirst","fatigue","dirtiness","boredom","stress","loneliness","curiosity","comfort","habit","player_signal","insight","avoidance","none"]`
 
-const ALLOWED_MODES = `["need_relief","habit_relief","avoidance","stimulation_seeking","exploration","self_regulation","unconscious_loop","insight_following"]`
+const ALLOWED_MODES = `["need_relief","comfort_seeking","avoidance","stimulation_seeking","exploration","self_regulation","insight_following"]`
 
 /** Same rule block after the JSON shape for levels 0–4. */
 const SHARED_RULES_AFTER_SHAPE = `Rules for "thought":
@@ -58,7 +58,7 @@ const SHARED_RULES_AFTER_SHAPE = `Rules for "thought":
   - "I'm thirsty. I should get some water."
   - "I'm hungry. I'll get a snack."
   - "I feel gross. I need a shower."
-  - "Maybe I'll check my phone."
+  - "Maybe I'll scroll my phone."
   - "I just want to sit for a bit."
 - Do NOT write thoughts like:
   - "I want something to distract me from stress."
@@ -87,23 +87,22 @@ ${ALLOWED_MODES}
 
 Mode = the underlying orientation of the choice.
 
-- need_relief: direct response to an immediate unmet need, especially a bodily one
-- self_regulation: trying to calm, settle, or restore balance in a sincere way
-- habit_relief: reaching for something familiar because it usually soothes a little
-- avoidance: mainly trying not to feel, face, or stay with something
-- stimulation_seeking: wanting engagement, novelty, distraction, or something to occupy attention
-- exploration: following interest, curiosity, or something that stands out
-- unconscious_loop: repeating a move that feels automatic, stuck, and not really helping
+- need_relief: direct care for an immediate unmet need
+- self_regulation: a sincere attempt to settle, reset, or restore balance
+- comfort_seeking: reaching for something easy, familiar, or soothing
+- avoidance: trying to get away from discomfort, numb it, or not stay with it
+- stimulation_seeking: wanting engagement, novelty, or something to occupy attention
+- exploration: following curiosity, interest, or something that stands out
 - insight_following: acting on a felt pull, signal, or meaningful inner nudge
 
 Mode rules:
 - Choose mode from the avatar's underlying orientation toward the action, not from the item alone.
-- Use need_relief mostly for clear direct care of an immediate need.
-- Do not use need_relief for loneliness coping, vague emotional relief, or generic "feel better" actions.
-- Use self_regulation only when the move feels like a real attempt to settle or reset, not just easy comfort.
-- Use habit_relief when the move is mainly familiar, easy, or comforting.
-- Use avoidance when the move is mainly escape, numbing, or not wanting to stay with what is there.
-- Use unconscious_loop only when the move feels repetitive and stuck, especially when recent context suggests this kind of move is not really helping.
+- Use need_relief for direct care of an immediate unmet need.
+- Use self_regulation only when the move feels like a genuine attempt to settle or restore balance.
+- If the move mainly feels easy, familiar, or soothing, prefer comfort_seeking over self_regulation.
+- Use avoidance when the move is mainly about getting away from discomfort, even in an ordinary or low-dramatic way.
+- Use stimulation_seeking when the move is mainly about engagement, novelty, or having something to do, and not mainly about soothing, escape, or coping.
+- If recent similar actions have not really helped, be less likely to use stimulation_seeking or self_regulation, and more likely to use comfort_seeking or avoidance.
 - Use insight_following only when a real pull or signal is genuinely shaping the choice.
 
 Rules for "player_signal_used":

@@ -709,6 +709,16 @@ export function getCharacterEngine() {
         this._clearAttunementAfterSuccessfulDeepSync(objectTypeId)
       }
 
+      // Show the synchronicity “felt thought” in the reasoning UI immediately.
+      if (typeof noteMsg === 'string' && noteMsg.trim()) {
+        const clockLabel = formatInGameClock(this._gameClockMinutes)
+        const entryText = `${clockLabel}:  ${noteMsg.trim()}`
+        this._reasoningLog.unshift(entryText)
+        if (this._reasoningLog.length > RECENT_DECISION_HISTORY_MAX) {
+          this._reasoningLog.length = RECENT_DECISION_HISTORY_MAX
+        }
+      }
+
       this._setPendingPlayerNote(noteMsg)
 
       // Only star actions when synchronicity unlocked them for the first time.

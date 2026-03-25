@@ -6,6 +6,8 @@
  * Rates are per "game minute" as passed into `updateNeeds(..., deltaMinutes)`.
  */
 
+import { NEEDS_EFFECTS_BY_ACTION_ID } from '../../data/objectTypes.js'
+
 export const NEED_KEYS = [
   'hunger',
   'thirst',
@@ -45,17 +47,4 @@ export const BASE_DRIFT = {
  * Action id -> delta per need (applied when action completes).
  * Deltas push needs toward 0 (restoring satisfaction).
  */
-export const ACTION_EFFECTS = {
-  go_to_sleep: { fatigue: -45, stress: -5 },
-  check_phone: { boredom: -18, loneliness: -6, stress: 6 },
-  watch_tv: { boredom: -22, loneliness: -3, stress: 4 },
-  look_out_window: { boredom: -6, stress: -6, loneliness: -8 },
-  browse_internet: { boredom: -26, loneliness: -5, stress: 7 },
-  read_book: { boredom: -14, stress: -12, fatigue: 4 },
-  use_treadmill: { stress: -22, boredom: -12, fatigue: 18, hunger: 8, thirst: 18, dirtiness: 35 },
-  eat_snack: { hunger: -40, thirst: 4 },
-  sit_on_couch: { fatigue: -8, stress: -6, boredom: 4, loneliness: 2 },
-  drink_water: { thirst: -45, hunger: -3 },
-  take_shower: { dirtiness: -60, stress: -18 },
-  use_sink: { dirtiness: -12, stress: -2 }
-}
+export const ACTION_EFFECTS = NEEDS_EFFECTS_BY_ACTION_ID

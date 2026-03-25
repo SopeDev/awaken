@@ -348,7 +348,7 @@ At key moments:
 ```json
 {
   "intent": "seek_distraction",
-  "action": "check_phone",
+  "action": "scroll_phone",
   "reason": "The avatar feels mild anxiety and prefers an easy dopamine activity over introspection.",
   "emotion": "restless",
   "priority": 0.72,
@@ -411,7 +411,7 @@ The **browser** posts structured game state to `POST /api/decision`. The **serve
     "perception": 65
   },
   "traitTensions": null,
-  "availableActions": ["check_phone", "look_out_window"],
+  "availableActions": ["scroll_phone", "look_out_window"],
   "playerSignal": null,
   "recentActions": ["sit_on_couch"],
   "significantMemory": null
@@ -1501,7 +1501,7 @@ needs = {
 ### 🚿 Hygiene Need
 - Rises passively over time
 - At high values: increases discomfort via subtle stress cross-effects
-- Critical threshold: **65+** — pushes self-care actions (shower/sink)
+- Critical threshold: **65+** — pushes self-care actions (e.g. shower)
 
 ---
 
@@ -1627,8 +1627,8 @@ Higher needs = stronger pressure = harder to override with player signals.
 
 | Threshold | Label | Decision Effect |
 |-----------|-------|-----------------|
-| 50+ | Dirty | Shower/sink actions +0.2 |
-| 65+ | Filthy | Shower/sink actions +0.4, discomfort increases |
+| 50+ | Dirty | Shower actions +0.2 |
+| 65+ | Filthy | Shower actions +0.4, discomfort increases |
 
 ---
 
@@ -1639,7 +1639,7 @@ Each action restores or modifies specific needs when executed.
 ```javascript
 const actionEffects = {
   go_to_sleep:  { fatigue: -25, boredom: -10, hunger: +5,  stress: -10 },
-  check_phone:       { boredom: -30, stress: +5,   connection_need: -10, fatigue: +2 },
+  scroll_phone:      { boredom: -30, stress: +5,   connection_need: -10, fatigue: +2 },
   watch_tv:          { boredom: -25, stress: -5,   fatigue: +5,  connection_need: -5 },
   sit_on_bed:        { fatigue: -5,  stress: -5,   boredom: +5 },
   go_to_bathroom:    { stress: -5 },
@@ -1651,12 +1651,11 @@ const actionEffects = {
   exercise:          { fatigue: -20, stress: -20,  boredom: -15, hunger: +10 },
   eat:               { hunger: -40, stress: -5,    fatigue: -5 },
   drink_water:       { thirst: -50 },
-  take_shower:       { hygiene_need: -60, stress: -10 },
-  use_sink:          { hygiene_need: -20, stress: -3 }
+  take_shower:       { hygiene_need: -60, stress: -10 }
 }
 ```
 
-> Note: `check_phone` relieves boredom but adds stress and is socially hollow.
+> Note: `scroll_phone` relieves boredom but adds stress and is socially hollow.
 > `look_out_window` relieves both boredom and stress and doesn't add stress.
 > This asymmetry is intentional — it's the mechanical expression of the game's central theme.
 
@@ -1949,7 +1948,7 @@ The avatar starts at **Consciousness Level 0 (Asleep)** with a score of ~15.
 
 ```
 go_to_sleep
-check_phone
+scroll_phone
 watch_tv
 sit_on_bed
 go_to_bathroom
@@ -1961,7 +1960,7 @@ look_out_window
 ### Expected Behavior
 
 **Default (no player influence):**
-- check phone
+- scroll phone
 - go to sleep
 
 **Player Influence:**
@@ -2153,7 +2152,7 @@ Actions the avatar can currently choose from during decision-making.
 
 Examples:
 
-* `check_phone`
+* `scroll_phone`
 * `watch_tv`
 * `sleep`
 

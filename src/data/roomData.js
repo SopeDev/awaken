@@ -24,16 +24,14 @@ export const ROOM_PLACEMENTS = [
   { objectTypeId: 'phone', gridX: 0, gridY: 7 },
   { objectTypeId: 'tv', gridX: 0, gridY: 4 },
   { objectTypeId: 'treadmill', gridX: 9, gridY: 5 },
-  { objectTypeId: 'computer', gridX: 10, gridY: 8 },
+  { objectTypeId: 'computer', gridX: 10, gridY: 7 },
   { objectTypeId: 'books', gridX: 8, gridY: 10 },
   { objectTypeId: 'window', gridX: 5, gridY: 0 },
   { objectTypeId: 'door', gridX: 5, gridY: 10 },
   { objectTypeId: 'refrigerator', gridX: 0, gridY: 1 },
   { objectTypeId: 'couch', gridX: 2, gridY: 4 },
   { objectTypeId: 'water_dispenser', gridX: 0, gridY: 2 },
-  { objectTypeId: 'shower', gridX: 9, gridY: 0 },
-  { objectTypeId: 'toilet', gridX: 10, gridY: 1 },
-  { objectTypeId: 'sink', gridX: 10, gridY: 2 }
+  { objectTypeId: 'shower', gridX: 9, gridY: 0 }
 ]
 
 /** Built from ROOM_PLACEMENTS + object type sizes. Used by Room scene and roomGrid. */

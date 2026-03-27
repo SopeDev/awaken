@@ -394,6 +394,15 @@ export function getCharacterEngine() {
       this._syncAttunementOverlaysToScene()
     },
 
+    _getTimeSpeedFactor() {
+      const s = Number(this.scene?.speedMultiplier)
+      return Number.isFinite(s) && s > 0 ? s : 1
+    },
+
+    _scaleMsForDebugSpeed(ms) {
+      return Math.max(0, Number(ms) / this._getTimeSpeedFactor())
+    },
+
     detachScene() {
       if (this._aiLoopTimer && this.scene) {
         this._aiLoopTimer.remove(false)
@@ -533,7 +542,7 @@ export function getCharacterEngine() {
         this._setPendingPlayerNote(`I feel a pull toward ${cardinalDirectionLabel(cardinal)}.`)
       }
       if (phase === AVATAR_PHASE.WALKING) room.cancelWalkForPlayerSignal()
-      this._directionalCooldownUntil = now + DIRECTIONAL_PULL_COOLDOWN_MS
+      this._directionalCooldownUntil = now + this._scaleMsForDebugSpeed(DIRECTIONAL_PULL_COOLDOWN_MS)
       this._logSignal({
         type: 'directional_pull',
         phase,
@@ -560,7 +569,7 @@ export function getCharacterEngine() {
       const nearbyTypes = getAdjacentObjectTypeIds(px, py, room.mapX, room.mapY, ROOM_OBJECTS)
       const actionIds = actionIdsForObjectTypes(nearbyTypes)
 
-      this._intuitionCooldownUntil = now + INTUITION_PULSE_COOLDOWN_MS
+      this._intuitionCooldownUntil = now + this._scaleMsForDebugSpeed(INTUITION_PULSE_COOLDOWN_MS)
 
       if (!actionIds.length) {
         this._logSignal({
@@ -690,7 +699,7 @@ export function getCharacterEngine() {
         return
       }
 
-      this._syncCooldownUntil = now + SYNCHRONICITY_COOLDOWN_MS
+      this._syncCooldownUntil = now + this._scaleMsForDebugSpeed(SYNCHRONICITY_COOLDOWN_MS)
 
       const level = getCharacterState().consciousnessLevel
       const traits = this.defaultTraits || {}
@@ -791,7 +800,7 @@ export function getCharacterEngine() {
     async _runDecisionTick(token) {
       if (!this.scene || token !== this._aiLoopToken) return
 
-      const AI_DECISION_INTERVAL_MS = 5000 / TEST_SPEED_MULTIPLIER
+      const AI_DECISION_INTERVAL_MS = this._scaleMsForDebugSpeed(5000 / TEST_SPEED_MULTIPLIER)
 
       if (this._suppressAIUntilMs && this.scene.time.now < this._suppressAIUntilMs) {
         this._scheduleDecisionLoopTick(token, AI_DECISION_INTERVAL_MS)
@@ -805,9 +814,10 @@ export function getCharacterEngine() {
 
       const nowMs = Number(this.scene?.time?.now) || 0
       const elapsedSinceActionEnd = nowMs - (Number(this._lastActionCompletedAtMs) || -Infinity)
+      const minPostActionGapMs = this._scaleMsForDebugSpeed(MIN_MS_BETWEEN_ACTION_AND_NEXT_DECISION)
       const bypassPostActionDelay = this._pendingImmediateDecisionFromDirectional === true
-      if (elapsedSinceActionEnd < MIN_MS_BETWEEN_ACTION_AND_NEXT_DECISION && !bypassPostActionDelay) {
-        const remaining = Math.max(0, MIN_MS_BETWEEN_ACTION_AND_NEXT_DECISION - elapsedSinceActionEnd)
+      if (elapsedSinceActionEnd < minPostActionGapMs && !bypassPostActionDelay) {
+        const remaining = Math.max(0, minPostActionGapMs - elapsedSinceActionEnd)
         this._scheduleDecisionLoopTick(token, remaining)
         return
       }

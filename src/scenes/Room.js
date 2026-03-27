@@ -25,6 +25,7 @@ import {
   pixelToTile,
   tileToPixel
 } from '../data/roomGrid.js'
+import { getObjectType } from '../data/objectTypes.js'
 import { EventBus } from '../eventBus.js'
 import { DEFAULT_HUD_CHROME_HEIGHT } from '../constants/uiLayout.js'
 import { getCharacterEngine } from '../systems/character/characterEngine.js'
@@ -49,6 +50,10 @@ const BORDER_WIDTH = 2
 const ACTION_PROGRESS_BAR_WIDTH = 46
 const ACTION_PROGRESS_BAR_HEIGHT = 6
 const ACTION_PROGRESS_BAR_OFFSET_Y = -18
+const THINKING_BUBBLE_OFFSET_X = 15
+const THINKING_BUBBLE_OFFSET_Y = -34
+const THINKING_BUBBLE_DOT_GAP = 8
+const THINKING_BUBBLE_PULSE_MS = 560
 
 export class Room extends Phaser.Scene {
   constructor() {
@@ -71,6 +76,7 @@ export class Room extends Phaser.Scene {
     this.drawObjects()
     this._directionalPullHighlightObjectTypeIds = new Set()
     this.initPlayer()
+    this.initThinkingBubble()
 
     this.characterEngine = getCharacterEngine()
     this.characterEngine.attachScene(this)
@@ -92,7 +98,7 @@ export class Room extends Phaser.Scene {
     this._abilityHandler = (payload) => {
       if (!payload || !this.characterEngine) return
       if (payload.type === 'intuition') this.characterEngine.onPlayerIntuitionPulse(this)
-      if (payload.type === 'synchronicity') this.characterEngine.onPlayerSynchronicity(this)
+      if (payload.type === 'attune') this.characterEngine.onPlayerAttune(this)
       if (payload.type === 'directional') this.characterEngine.onPlayerDirectionalPull(this, payload.direction)
     }
     EventBus.on('ability-signal', this._abilityHandler)
@@ -121,6 +127,14 @@ export class Room extends Phaser.Scene {
       if (this._abilityHandler) EventBus.off('ability-signal', this._abilityHandler)
       if (this._hudChromeHandler) EventBus.off('hud-chrome-height', this._hudChromeHandler)
       if (this._scaleResizeHandler) this.scale.off('resize', this._scaleResizeHandler)
+      if (this._thinkingBubblePulseTween) {
+        this._thinkingBubblePulseTween.stop()
+        this._thinkingBubblePulseTween = null
+      }
+      if (this._thinkingBubbleContainer) {
+        this._thinkingBubbleContainer.destroy(true)
+        this._thinkingBubbleContainer = null
+      }
     })
 
     EventBus.emit('current-scene-ready', this)
@@ -202,6 +216,7 @@ export class Room extends Phaser.Scene {
 
   /** @returns {typeof AVATAR_PHASE[keyof typeof AVATAR_PHASE]} */
   getAvatarActionPhase() {
+    if (this.characterEngine?.isDecisionInFlight?.()) return AVATAR_PHASE.PROCESSING
     if (!this.isExecutingAction) return AVATAR_PHASE.AWAITING
     if (this._interactionStartAtMs != null) return AVATAR_PHASE.PERFORMING
     if (this._actionPath && this._actionPathIndex < this._actionPath.length) return AVATAR_PHASE.WALKING
@@ -443,8 +458,8 @@ export class Room extends Phaser.Scene {
     }
   }
 
-  /** Synchronicity used without attunement / on a shallow object — no cooldown consumed. */
-  playSynchronicityBlockedFeedback() {
+  /** Attune used without attunement / on a shallow object — no cooldown consumed. */
+  playAttuneBlockedFeedback() {
     const cam = this.cameras?.main
     if (cam && typeof cam.flash === 'function') {
       cam.flash(180, 36, 32, 44, false)
@@ -460,6 +475,48 @@ export class Room extends Phaser.Scene {
     this.player.setInputController({ isLocked: () => true })
   }
 
+  initThinkingBubble() {
+    const bubble = this.add.ellipse(0, 0, 30, 20, 0xf3f4ff, 0.95)
+      .setStrokeStyle(1.5, 0xb9bfd3, 0.9)
+    const tailA = this.add.circle(-8, 11, 3, 0xf3f4ff, 0.9).setStrokeStyle(1, 0xb9bfd3, 0.85)
+    const tailB = this.add.circle(-13, 16, 2, 0xf3f4ff, 0.82).setStrokeStyle(1, 0xb9bfd3, 0.75)
+    const dot0 = this.add.circle(-THINKING_BUBBLE_DOT_GAP, -1, 2, 0x8f98bb, 0.45)
+    const dot1 = this.add.circle(0, -1, 2, 0x8f98bb, 0.45)
+    const dot2 = this.add.circle(THINKING_BUBBLE_DOT_GAP, -1, 2, 0x8f98bb, 0.45)
+    this._thinkingBubbleDots = [dot0, dot1, dot2]
+
+    this._thinkingBubbleContainer = this.add
+      .container(0, 0, [bubble, tailA, tailB, dot0, dot1, dot2])
+      .setDepth(220)
+      .setVisible(false)
+
+    this._thinkingBubblePulseTween = this.tweens.add({
+      targets: this._thinkingBubbleDots,
+      alpha: { from: 0.32, to: 1.0 },
+      duration: THINKING_BUBBLE_PULSE_MS,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.InOut',
+      stagger: 130
+    })
+    this._thinkingBubblePulseTween.pause()
+  }
+
+  updateThinkingBubble() {
+    if (!this._thinkingBubbleContainer || !this.player || !this.characterEngine) return
+    this._thinkingBubbleContainer.setPosition(
+      this.player.x + THINKING_BUBBLE_OFFSET_X,
+      this.player.y + THINKING_BUBBLE_OFFSET_Y
+    )
+
+    const shouldShow = this.characterEngine.isDecisionInFlight()
+    this._thinkingBubbleContainer.setVisible(shouldShow)
+    if (this._thinkingBubblePulseTween) {
+      if (shouldShow) this._thinkingBubblePulseTween.resume()
+      else this._thinkingBubblePulseTween.pause()
+    }
+  }
+
   update(time, delta) {
     if (this.isPaused) return
     const dtMs = delta * (this.time?.timeScale || 1)
@@ -469,6 +526,7 @@ export class Room extends Phaser.Scene {
     }
     this.pollPlayerSignalKeys()
     this.updateActionProgressBar()
+    this.updateThinkingBubble()
 
     if (this.isExecutingAction && this.player) {
       this.updateActionPath()
@@ -518,7 +576,7 @@ export class Room extends Phaser.Scene {
     if (this.cursors?.down && J(this.cursors.down)) this.characterEngine.onPlayerDirectionalPull(this, 's')
     if (this.cursors?.right && J(this.cursors.right)) this.characterEngine.onPlayerDirectionalPull(this, 'd')
     if (J(this.keySpace)) this.characterEngine.onPlayerIntuitionPulse(this)
-    if (J(this.keyE)) this.characterEngine.onPlayerSynchronicity(this)
+    if (J(this.keyE)) this.characterEngine.onPlayerAttune(this)
   }
 
   executeAction(actionId) {
@@ -532,17 +590,27 @@ export class Room extends Phaser.Scene {
     if (!obj) return false
 
     const from = pixelToTile(this.player.x - this.mapX, this.player.y - this.mapY)
-    const candidates = getWalkableTilesAdjacentToObject(obj)
-    if (!candidates.length) return false
+    const objectType = getObjectType(config.objectTypeId)
+    const preferredSide = objectType?.interactionSide || null
 
-    let bestGoal = null
-    let bestPathLength = Infinity
-    for (const tile of candidates) {
-      const p = findPath(from.tx, from.ty, tile.tx, tile.ty)
-      if (p.length > 0 && p.length < bestPathLength) {
-        bestPathLength = p.length
-        bestGoal = tile
+    const pickBestGoal = (candidates) => {
+      let bestGoal = null
+      let bestPathLength = Infinity
+      for (const tile of candidates) {
+        const p = findPath(from.tx, from.ty, tile.tx, tile.ty)
+        if (p.length > 0 && p.length < bestPathLength) {
+          bestPathLength = p.length
+          bestGoal = tile
+        }
       }
+      return bestGoal
+    }
+
+    const preferredCandidates = getWalkableTilesAdjacentToObject(obj, preferredSide)
+    let bestGoal = pickBestGoal(preferredCandidates)
+    if (!bestGoal) {
+      const anySideCandidates = getWalkableTilesAdjacentToObject(obj)
+      bestGoal = pickBestGoal(anySideCandidates)
     }
     if (!bestGoal) return false
 
@@ -629,9 +697,9 @@ export class Room extends Phaser.Scene {
 
   /**
    * End interaction without onActionCompleted (no habituation / completion bookkeeping).
-   * Used when synchronicity succeeds mid-action.
+   * Used when Attune succeeds mid-action.
    */
-  cancelOngoingInteractionForSynchronicity() {
+  cancelOngoingInteractionForAttune() {
     if (this._interactionFinishTimer) {
       this._interactionFinishTimer.remove(false)
       this._interactionFinishTimer = null

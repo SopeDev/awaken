@@ -22,10 +22,10 @@ export const INITIAL_NEEDS = {
   hunger: 55,
   thirst: 55,
   fatigue: 20,
-  dirtiness: 40,
+  dirtiness: 30,
   boredom: 20,
   stress: 30,
-  loneliness: 40
+  loneliness: 30
 }
 
 /**

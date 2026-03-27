@@ -29,7 +29,7 @@ export const ROOM_PLACEMENTS = [
   { objectTypeId: 'window', gridX: 5, gridY: 0 },
   { objectTypeId: 'door', gridX: 5, gridY: 10 },
   { objectTypeId: 'refrigerator', gridX: 0, gridY: 1 },
-  { objectTypeId: 'couch', gridX: 2, gridY: 4 },
+  { objectTypeId: 'couch', gridX: 3, gridY: 4 },
   { objectTypeId: 'water_dispenser', gridX: 0, gridY: 2 },
   { objectTypeId: 'shower', gridX: 9, gridY: 0 }
 ]

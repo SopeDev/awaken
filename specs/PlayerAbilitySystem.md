@@ -1,112 +1,80 @@
 # Player Ability System
 
-This spec reflects the *current* mechanics implemented in code (as of the latest build).
+## 1) What player abilities are
 
-## What the player can (and cannot) do
+Player abilities are influence tools, not direct controls.
 
-The player does **not** directly control the avatar’s movement or action execution.
+- You steer attention
+- You suggest possibilities
+- The avatar still makes the final choice
 
-Instead, the player triggers **signals** that:
+### Dev Notes
+- Core signal system: `src/systems/playerSignals/*`
+- Cooldowns/constants: `src/systems/playerSignals/constants.js`
 
-1. Add first-person narrative text (`playerSignalNote`) to the LLM prompt (sometimes, depending on consciousness level).
-2. Provide **salience markers** by sending `salientActionIds` to the decision backend. In the LLM user message, those action IDs are marked with `*`.
-3. Optionally affect **Awareness** when the LLM decision includes a marked action and the LLM reports `decision_factors.player_signal_used` as `true`.
+## 2) Directional Pull
 
-## Current abilities (signals)
+You press a direction to nudge the avatar toward things in that direction.
 
-There are three player abilities surfaced by the UI:
+- Objects in that direction get a subtle yellow outline
+- The outline is a quick visual cue for the player
+- It clears immediately when any interaction starts
 
-1. Directional Pull
-2. Intuition Pulse
-3. Synchronicity
+### Dev Notes
+- Input keys: `W / A / S / D`
+- Allowed phases: `awaiting`, `walking`
+- Blocked phase: `performing`
+- Highlighted choices are added to `salientActionIds`
 
-Cooldown durations come from `src/systems/playerSignals/constants.js`.
+## 3) Intuition Pulse
 
-### 1) Directional Pull
+You send a pulse around the avatar to amplify nearby meaningful options.
 
-Activation:
-- Keys: `W / A / S / D`
-- Cooldown: `DIRECTIONAL_PULL_COOLDOWN_MS`
-- Allowed phases: `awaiting` and `walking`
-- Blocked during: `performing`
+- It can surface nearby objects as stronger candidates
+- It can add a brief intuition-style thought to the avatar reasoning
+- If used while walking, it can redirect the avatar into a fresh decision
+- Revealing hidden meaning is one-time per object instance in the current run: once an object's reveal is consumed by Attune, Intuition Pulse cannot reveal that same object again
 
-Mechanics:
-- On activation, the engine computes a cardinal sector around the avatar and derives **action IDs** that correspond to objects in that sector.
-- Those action IDs are stored as the decision’s `salientActionIds` (so the LLM user message marks them with `*`).
-- Narrative note injection:
-  - If `consciousnessLevel > 0`, the engine sets a short directional note (first-person line).
-  - If `consciousnessLevel === 0`, no directional narrative note is injected (so the `*` cue does the work).
+### Dev Notes
+- Input key: `Space`
+- Allowed in all phases
+- Nearby object scan maps to actions
+- Deep/attuned objects can add to `salientActionIds` and intuition note text
+- Revealed objects are tracked and marked consumed after successful Attune, so they are not re-attuned again
 
-Awareness link:
-- When the LLM returns a decision that includes any marked/salient action, the backend reads `decision_factors.player_signal_used` and applies an awareness bump or penalty accordingly.
+## 4) Attune
 
-Visual cue:
-- The Room briefly outlines the objects corresponding to the sector targets, and clears outlines as soon as an interaction starts.
-- The highlight is a subtle yellow stroke outline (Room sets `setStrokeStyle(3, 0xffe066, 0.85)`), and it is cleared when any action begins.
+You trigger Attune during an ongoing interaction.
 
-### 2) Intuition Pulse
+- Works only in the right moment and context
+- On success, the current interaction resolves early
+- Can unlock new possibilities in the room
+- It is only usable when the current action is tied to an object that is currently revealed/attuned
 
-Activation:
-- Key: `Space`
-- Cooldown: `INTUITION_PULSE_COOLDOWN_MS`
-- Allowed phases: all phases, but decisions are requested immediately only from `awaiting`
-
-Mechanics:
-- The engine inspects the surrounding 3x3 neighborhood (adjacent object types) and maps nearby object types to action IDs.
-- Hidden-depth (“deep”) objects:
-  - Attuned state is applied for deep objects.
-  - Those deep objects’ actions are included in `salientActionIds`.
-  - A felt first-person intuition note may be injected when deep objects are attuned.
-- Shallow objects:
-  - No attunement.
-  - Dismissive flicker feedback may be triggered for shallow-only neighborhoods.
-
-Decision scheduling:
-- If the avatar is `walking`, the engine cancels the walk and requests a new decision.
-- If the avatar is `awaiting`, it requests a new decision only when the LLM decision loop is not already in flight.
-
-Awareness link:
-- As with directional pull: if the LLM chooses an action contained in `salientActionIds`, awareness bump/penalty depends on `decision_factors.player_signal_used`.
-
-### 3) Synchronicity
-
-Activation:
-- Key: `E`
-- Cooldown: `SYNCHRONICITY_COOLDOWN_MS`
+### Dev Notes
+- Input key: `E`
 - Allowed phase: `performing` only
+- Requires hidden-depth object + attunement
+- Success path can flush relief-only pending need deltas and unlock actions
+- UI also disables Attune unless that current-action object is attuned
 
-Mechanics:
-- The engine reads the action currently being executed (`room._interactionActionId`) and its `objectTypeId`.
-- Preconditions:
-  - The object type must have hidden depth.
-  - The object type must be attuned (deep-sync requires prior intuition attunement).
-- Notice roll:
-  - It computes `primed` when any of the following is true:
-    - `perception > SYNCHRONICITY_NOTICE_PERCEPTION_THRESHOLD`
-    - `boredom > SYNCHRONICITY_NOTICE_BOREDOM_THRESHOLD`
-    - `consciousnessLevel >= SYNCHRONICITY_NOTICE_LEVEL_MIN`
-  - It sets `noticeP`:
-    - `SYNCHRONICITY_NOTICE_PRIMED_CHANCE` when `primed === true`
-    - `SYNCHRONICITY_NOTICE_BASE_CHANCE` otherwise
-  - It then rolls `noticed` as `Math.random() < noticeP`
-- If the ability is blocked (not hidden depth, or not attuned), the engine returns without applying the synchronicity success path.
-- On success (`noticed === true`):
-  - Ends the ongoing interaction early and flushes pending **negative** need deltas (relief-only semantics).
-  - Sets a new first-person synchronicity note.
-  - Applies tutorial/discovery logic: if synchronicity matches a discovery step, it unlocks new actions in the Room for future decisions.
-  - Adds newly unlocked actions (only, on first unlock) into `salientActionIds` for LLM star-marking.
+## 5) How abilities influence awareness
 
-Awareness link:
-- Awareness bump/penalty occurs via the same `salientActionIds` + `decision_factors.player_signal_used` mechanism.
+Player influence can change awareness if it meaningfully affects a decision.
 
-## Salience markers (`*`) and LLM contract
+- Influence lands -> bump
+- Influence ignored -> small penalty
+- Influence lands and chosen action was highlighted -> extra bump
 
-The decision prompt uses `*` markers in the **available action list** to represent “active cue targets”.
+### Dev Notes
+- Highlighted choices are sent as `salientActionIds` and marked with `*` in action list
+- Influence result comes from `decision_factors.player_signal_used`
+- Overlap bonus applies when chosen action is also in highlighted available choices
+- Backend strips trailing `*` from returned action before validation
 
-The meaning of `*` is defined in `src/systems/llm/systemPrompts.js` via:
-- a level-specific cue line for levels 0–4
-- and a corresponding JSON schema requirement that the model returns `action` without the `*`.
+## 6) Player wording to developer wording
 
-On the backend:
-- the returned `action` is normalized by stripping trailing `*` characters before validation.
+- highlighted choice -> `salientActionIds` entry
+- influence landed -> `decision_factors.player_signal_used === true`
+- stuck repetitive pattern -> `decision_factors.unconscious_loop === true`
 

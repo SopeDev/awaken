@@ -1,20 +1,36 @@
 # Spec Index
 
-This folder contains the game’s living documentation. `specs/README.md` is the canonical entry point.
+This folder contains the living documentation for Awaken.
+
+## How to read these docs
+
+Each system file is organized in two layers:
+
+1. **Player-Friendly View**: plain-language explanation of what the player experiences
+2. **Developer Notes**: exact implementation details and code references
+
+If you only need gameplay intent, read the player-friendly sections.
 
 ## Master design doc
 
-- `awaken.md` — overall design bible (with links into the system specs below)
+- `awaken.md` — overall game vision and high-level design
 
 ## System specs
 
-- `AvatarSystem.md` — AI avatar decision loop and `/api/decision` prompt contract
-- `NeedsSystem.md` — needs model, tick rules, action effects, habituation, and prompt conversion
-- `AwarenessSystem.md` — baseline + dynamic awareness computation and UI thresholds
-- `PlayerAbilitySystem.md` — directional pull, intuition pulse, synchronicity, cooldowns, and `*` salience contract
-- `CosmicBlueprintSystem.md` — trait origin and how placements feed traits (feeds LLM context)
+- `AvatarSystem.md` — how the avatar decides what to do
+- `NeedsSystem.md` — needs pressure, action effects, and perceived relief
+- `AwarenessSystem.md` — how awareness rises and falls
+- `PlayerAbilitySystem.md` — what player abilities do and how they influence choices
+- `CosmicBlueprintSystem.md` — how natal-chart traits shape behavior
 
-## Notes
+## Translation guide (player wording ↔ dev wording)
 
-If a spec ever feels out of date, treat the corresponding `src/systems/**` code as the source of truth and update the spec to match the current implementation.
+- `highlighted option` ↔ `salient action`
+- `player influence landed` ↔ `decision_factors.player_signal_used === true`
+- `stuck loop` ↔ `decision_factors.unconscious_loop === true`
+- `decision request` ↔ `POST /api/decision`
+
+## Source of truth rule
+
+If any spec drifts from implementation, treat `src/systems/**` and `server/**` as source of truth and update the docs.
 

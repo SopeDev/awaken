@@ -88,7 +88,7 @@ export function AwarenessStrip({
     'Baseline: needs-driven meter (0..50).',
     'Dynamic: decision-driven add-on (0..baseline).',
     'Final meter: baseline + dynamic (0..100, capped by UI bands).',
-    `Synchronicity success chance: 50% + dynamic/50 (currently ~${successChancePct}%).`
+    `Attune success chance: 50% + dynamic/50 (currently ~${successChancePct}%).`
   ].join('\n')
 
   const TOOLTIP_DELAY_MS = 1000

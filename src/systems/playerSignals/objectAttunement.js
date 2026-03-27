@@ -1,6 +1,6 @@
 /**
  * Intuition Pulse attunement: object types with hidden depth can be attuned,
- * then stay marked until synchronicity lands on that object.
+ * then stay marked until Attune lands on that object.
  */
 
 import { getObjectType } from '../../data/objectTypes.js'
@@ -15,13 +15,13 @@ export function objectTypeHasHiddenDepth(objectTypeId) {
 }
 
 /**
- * @returns {{ isAttuned: boolean, attunedAtMs: number|null, synchronicityConsumed: boolean }}
+ * @returns {{ isAttuned: boolean, attunedAtMs: number|null, attuneConsumed: boolean }}
  */
 export function createEmptyAttunementRecord() {
   return {
     isAttuned: false,
     attunedAtMs: null,
-    synchronicityConsumed: false
+    attuneConsumed: false
   }
 }
 

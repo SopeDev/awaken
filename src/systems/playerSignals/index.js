@@ -5,4 +5,4 @@ export {
   createEmptyAttunementRecord,
   objectTypeHasHiddenDepth
 } from './objectAttunement.js'
-export { getSynchronicityNoteForAction } from './synchronicityCopy.js'
+export { getAttuneNoteForAction, getSynchronicityNoteForAction } from './synchronicityCopy.js'

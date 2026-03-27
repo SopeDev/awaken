@@ -1,17 +1,19 @@
 /**
  * Needs → natural language for LLM.
  *
- * Same wording at every consciousness level:
- * - r0 (0–19): omit need entirely
+ * Wording by band (r4 ≥80, r3 ≥60, r2 ≥40, r1 ≥20, r0 <20):
+ * - r0: omit
  * - r1: a little [adjective]
  * - r2: [adjective]
  * - r3: pretty [adjective]
  * - r4: very [adjective]
  *
- * Bands: r4 ≥80, r3 ≥60, r2 ≥40, r1 ≥20, r0 <20.
+ * Consciousness level 0 only reports r2 and up (need value ≥40); level 1+ keeps r1 and up as before.
  */
 
 import { NEED_KEYS } from '../needs/constants.js'
+
+const BAND_RANK = Object.freeze({ r0: 0, r1: 1, r2: 2, r3: 3, r4: 4 })
 
 function band5(value) {
   const v = Math.max(0, Math.min(100, Number(value) || 0))
@@ -33,9 +35,9 @@ const NEED_BASE = {
   loneliness: 'lonely'
 }
 
-function phraseForNeed(key, value) {
+function phraseForNeed(key, value, minBand = 'r1') {
   const band = band5(value)
-  if (band === 'r0') return null
+  if (BAND_RANK[band] < BAND_RANK[minBand]) return null
   const base = NEED_BASE[key]
   if (!base) return null
   if (band === 'r1') return `a little ${base}`
@@ -47,15 +49,17 @@ function phraseForNeed(key, value) {
 
 /**
  * @param {Record<string, number>} needs
- * @param {number} [_consciousnessLevel] unused; kept for call-site compatibility
+ * @param {number} [consciousnessLevel] level 0 → only r2+ needs in prose; else r1+
  * @returns {string}
  */
-export function buildNeedsDescription(needs, _consciousnessLevel = 5) {
+export function buildNeedsDescription(needs, consciousnessLevel = 5) {
+  const lv = Number(consciousnessLevel)
+  const minBand = lv === 0 ? 'r2' : 'r1'
   const n = needs || {}
   const parts = []
   for (const key of NEED_KEYS) {
     const v = Math.max(0, Math.min(100, Number(n[key]) || 0))
-    const phrase = phraseForNeed(key, v)
+    const phrase = phraseForNeed(key, v, minBand)
     if (phrase) parts.push(phrase)
   }
   if (parts.length === 0) return 'fine'

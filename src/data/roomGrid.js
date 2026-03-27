@@ -152,13 +152,33 @@ export function tileToPixel(tx, ty) {
 
 /**
  * All walkable tiles that share an edge with the object (candidates for interaction goal).
+ * `preferredSide` may be: top | bottom | left | right.
  */
-export function getWalkableTilesAdjacentToObject(obj) {
+export function getWalkableTilesAdjacentToObject(obj, preferredSide = null) {
   const { gridX: gx, gridY: gy, gridW: gw, gridH: gh } = obj
   const out = []
   const pushIfWalkable = (tx, ty) => {
     if (tx >= 0 && tx < COLS && ty >= 0 && ty < ROWS && isWalkable(tx, ty)) out.push({ tx, ty })
   }
+  const side = typeof preferredSide === 'string' ? preferredSide.trim().toLowerCase() : null
+
+  if (side === 'top') {
+    for (let i = 0; i < gw; i++) pushIfWalkable(gx + i, gy - 1)
+    return out
+  }
+  if (side === 'bottom') {
+    for (let i = 0; i < gw; i++) pushIfWalkable(gx + i, gy + gh)
+    return out
+  }
+  if (side === 'left') {
+    for (let j = 0; j < gh; j++) pushIfWalkable(gx - 1, gy + j)
+    return out
+  }
+  if (side === 'right') {
+    for (let j = 0; j < gh; j++) pushIfWalkable(gx + gw, gy + j)
+    return out
+  }
+
   for (let i = 0; i < gw; i++) {
     pushIfWalkable(gx + i, gy - 1)
     pushIfWalkable(gx + i, gy + gh)

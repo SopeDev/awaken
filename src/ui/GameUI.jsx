@@ -21,8 +21,9 @@ const defaultState = {
   awarenessDynamicBuffer: 0,
   traits: {},
   reasoningText: 'Waiting for next decision…',
-  signalCooldownsMs: { directional: 0, intuition: 0, synchronicity: 0 },
-  avatarPhase: 'awaiting'
+  signalCooldownsMs: { directional: 0, intuition: 0, attune: 0 },
+  avatarPhase: 'awaiting',
+  attuneAvailable: false
 }
 
 export function GameUI() {
@@ -50,7 +51,8 @@ export function GameUI() {
         reasoningText: payload.reasoningText ?? defaultState.reasoningText,
         gameClockDisplay: payload.gameClockDisplay ?? defaultState.gameClockDisplay,
         signalCooldownsMs: payload.signalCooldownsMs ?? defaultState.signalCooldownsMs,
-        avatarPhase: payload.avatarPhase ?? defaultState.avatarPhase
+        avatarPhase: payload.avatarPhase ?? defaultState.avatarPhase,
+        attuneAvailable: payload.attuneAvailable ?? defaultState.attuneAvailable
       })
     }
     EventBus.on('room-ui-state', handler)
@@ -241,6 +243,7 @@ export function GameUI() {
         hudHeight={hudHeight}
         consciousnessLevel={consciousnessLevel}
         awarenessDynamicBuffer={state.awarenessDynamicBuffer}
+        attuneAvailable={state.attuneAvailable}
       />
       <TraitsModal
         open={traitsModalOpen}

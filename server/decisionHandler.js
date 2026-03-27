@@ -4,7 +4,8 @@
 
 import OpenAI from 'openai'
 import { buildUserPromptContent } from '../src/systems/llm/buildUserPrompt.js'
-import { getSystemPrompt } from '../src/systems/llm/systemPrompts.js'
+import { deriveUnconsciousLoop } from '../src/systems/decision/deriveUnconsciousLoop.js'
+import { DECISION_FACTOR_MODES, getSystemPrompt } from '../src/systems/llm/systemPrompts.js'
 import { ACTION_EFFECTS, NEED_KEYS } from '../src/systems/needs/constants.js'
 
 const TEMPERATURE = 0.85
@@ -27,22 +28,12 @@ const DECISION_FACTOR_PRIMARY_SECONDARY_VALUES = new Set([
   'avoidance',
   'none'
 ])
-const DECISION_FACTOR_MODE_VALUES = new Set([
-  'need_relief',
-  'habit_relief',
-  'avoidance',
-  'stimulation_seeking',
-  'exploration',
-  'self_regulation',
-  'unconscious_loop',
-  'signal_response',
-  'insight_following'
-])
+const DECISION_FACTOR_MODE_VALUES = new Set(DECISION_FACTOR_MODES)
 const DECISION_FACTOR_CONFIDENCE_VALUES = new Set(['low', 'medium', 'high'])
 const DEFAULT_DECISION_FACTORS = {
   primary: 'none',
   secondary: 'none',
-  mode: 'unconscious_loop',
+  mode: 'none',
   player_signal_used: false,
   repetition_acknowledged: false,
   confidence: 'low'
@@ -289,7 +280,8 @@ function sanitizeSecondaryReason(primary, secondary, mode, playerSignalUsed, act
   }
 
   if (secondaryFamily === 'higher_signal') {
-    const validSignalContext = playerSignalUsed || mode === 'signal_response' || mode === 'insight_following'
+    const validSignalContext =
+      playerSignalUsed || mode === 'insight_following' || mode === 'exploration'
     if (!validSignalContext) {
       result.secondary = 'none'
       result.sanitized = true
@@ -386,6 +378,9 @@ export async function handleDecisionRequest(body, options = {}) {
     playerSignalNote: body.playerSignalNote ?? null,
     feltOutcomeLine: body.feltOutcomeLine ?? null,
     recentFeltOutcomes: Array.isArray(body.recentFeltOutcomes) ? body.recentFeltOutcomes : [],
+    recentCompletionEvaluations: Array.isArray(body.recentCompletionEvaluations)
+      ? body.recentCompletionEvaluations
+      : [],
     loopHint: body.loopHint ?? null,
     patternSummaries: Array.isArray(body.patternSummaries) ? body.patternSummaries : [],
     recentActions: body.recentActions || [],
@@ -423,6 +418,7 @@ export async function handleDecisionRequest(body, options = {}) {
     playerSignalNote: body.playerSignalNote ?? null,
     feltOutcomeLine: body.feltOutcomeLine ?? null,
     recentFeltOutcomes: body.recentFeltOutcomes ?? [],
+    recentCompletionEvaluations: body.recentCompletionEvaluations ?? [],
     loopHint: body.loopHint ?? null,
     patternSummaries: body.patternSummaries ?? [],
     recentActions: body.recentActions ?? [],

@@ -1,6 +1,18 @@
 ---
 ## 9. Cosmic Blueprint System
 
+### Player-Friendly View
+
+The Cosmic Blueprint is the avatar's personality blueprint at the start of a run.
+
+- It sets natural strengths and weak spots
+- It explains why two avatars react differently to the same situation
+- It shapes how easy or hard it is to break habits and follow guidance
+
+### Developer Notes
+
+The rest of this file is the technical model: trait deltas, dignity modifiers, and calculation formulas that generate initial trait values.
+
 Each avatar possesses a **Cosmic Blueprint** — an astrological natal chart
 that defines their innate psychological tendencies as starting trait values.
 

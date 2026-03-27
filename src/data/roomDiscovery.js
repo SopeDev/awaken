@@ -1,7 +1,14 @@
 /**
- * Tutorial room discovery chains: synchronicity unlocks + one-time LLM thought injection.
+ * Tutorial room discovery chains: Attune unlocks + one-time LLM thought injection.
  * Extend with new `chains` entries and step arrays for future rooms.
  */
+
+import { SYNCHRONICITY_NOTE_BY_ACTION_ID } from './objectTypes.js'
+
+function discoveryThoughtForAction(actionId) {
+  const fromGeneric = SYNCHRONICITY_NOTE_BY_ACTION_ID?.[actionId]
+  return typeof fromGeneric === 'string' ? fromGeneric : ''
+}
 
 /** @typedef {{ id: string, objectTypeId: string, requiresActionId: string, discoveryThought: string, unlockActionIds: string[] }} RoomDiscoveryStep */
 
@@ -17,16 +24,14 @@ export const ROOM_DISCOVERY_CHAINS = {
         id: 'books_bird_passage',
         objectTypeId: 'books',
         requiresActionId: 'read_book',
-        discoveryThought:
-          'A passage about birds lands differently. I glance toward the window.',
+        discoveryThought: discoveryThoughtForAction('read_book'),
         unlockActionIds: ['look_out_window']
       },
       {
         id: 'window_bird_sill',
         objectTypeId: 'window',
         requiresActionId: 'look_out_window',
-        discoveryThought:
-          'A bird lands on the sill. Something about it feels important.',
+        discoveryThought: discoveryThoughtForAction('look_out_window'),
         unlockActionIds: ['go_outside']
       }
     ]

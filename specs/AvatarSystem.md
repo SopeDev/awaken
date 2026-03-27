@@ -1,146 +1,93 @@
 # Avatar System (AI-Driven)
 
-The avatar is an **AI-driven autonomous agent**.
+## 1) What this system is in gameplay terms
 
-It is **not** directly controlled by the player. The player only influences the avatar by sending **signals** (directional pull, intuition pulse, synchronicity). From there, the avatar:
-- processes internal psychological state (needs, habituation effects, etc.)
-- builds a structured input payload
-- asks the server/LLM what to do next
-- executes the chosen action in the game world
+The avatar is autonomous.  
+You influence it, but you do not directly command it.
 
-Other specs define the supporting systems:
-- Needs: `NeedsSystem.md`
-- Awareness: `AwarenessSystem.md`
-- Player signals: `PlayerAbilitySystem.md`
-- Cosmic Blueprint: `CosmicBlueprintSystem.md`
+### Dev Notes
+- Core runner: `src/systems/character/characterEngine.js`
+- Supporting specs: `NeedsSystem.md`, `AwarenessSystem.md`, `PlayerAbilitySystem.md`, `CosmicBlueprintSystem.md`
 
-## Episodic decision-making (not continuous control)
+## 2) How a decision cycle feels to the player
 
-Decisions happen in discrete ticks. The engine does **not** continuously choose actions every frame.
+The avatar operates in short decision cycles:
+1. it gathers current context
+2. it considers your active influence
+3. it picks one action
+4. it performs that action before deciding again
 
-At each decision tick:
-1. The engine collects a decision snapshot (player note, salience targets, felt-outcome line).
-2. The engine requests a decision from the LLM via `POST /api/decision`.
-3. The engine executes the selected action via `scene.executeAction(actionId)`.
-4. The next decision only runs after the scheduling logic allows it (and the action is no longer executing).
+This creates behavior that feels intentional, not twitchy.
 
-### Decision tick gating
+### Dev Notes
+- Decision loop uses discrete ticks, not per-frame choice
+- Tick scheduler in `_runDecisionTick`
+- Next decision waits for gating conditions and current action status
 
-The decision tick runner (`_runDecisionTick`) refuses to call the LLM if:
-- the scene is missing or the loop token doesn’t match
-- AI is suppressed until some future time
-- the scene is currently executing an action
-- a previous decision is still in flight
+## 3) When the avatar is allowed to ask for a new decision
 
-When it *does* run, it schedules the next attempt using:
-- `AI_DECISION_INTERVAL_MS = 5000 / TEST_SPEED_MULTIPLIER`
+The avatar will not request a new decision if:
+- an action is already being performed
+- a decision request is still in flight
+- AI is temporarily suppressed
 
-## Decision snapshot (what the LLM sees as “player influence”)
+### Dev Notes
+- Gating checks happen before `chooseNextActionAsync`
+- Interval base: `AI_DECISION_INTERVAL_MS = 5000 / TEST_SPEED_MULTIPLIER`
 
-Before calling the backend, the engine snapshot:
-- `note`: injected first-person text (only when present)
-- `salientActionIds`: action IDs selected by player signals (used for `*` marking)
-- `feltOutcomeLine`: optional context line derived from post-action evaluation
+## 4) How player influence enters the decision
 
-After snapshotting, these values are cleared until new signals arrive.
+Your abilities can contribute:
+- a short internal note
+- highlighted options in the action list
+- recent felt context from prior outcomes
 
-## Action space: alphabetical, and discovery gating
+These are inputs, not hard commands.
 
-The LLM decision always operates on an action list built from the game’s action registry:
-- `getAvailableActionIdsForDecision()` returns a list in **A–Z alphabetical order**
-- when in the Room and a tutorial/discovery chain is active, some actions are locked and removed from the decision set
+### Dev Notes
+- Snapshot fields include `playerSignalNote`, `salientActionIds`, `feltOutcomeLine`
+- Snapshot is collected then cleared for future cycles
+- Highlighted options are represented with `*` in prompt action list
 
-Important: the engine does not do heuristic scoring or weighted ordering for the LLM prompt. The action list order is deterministic (alphabetical).
+## 5) What choices the avatar can pick from
 
-## LLM prompt contract: `*` marks salience targets
+The avatar only chooses from currently available actions.  
+Order is stable and alphabetical so there is no hidden weighting by position.
 
-Player signals produce `salientActionIds`. The client sends them to the server as `salientActionIds`.
+### Dev Notes
+- Source list: `getAvailableActionIdsForDecision()`
+- Ordering: A-Z deterministic
+- Discovery/tutorial gating can remove locked actions from available set
 
-On the backend, `buildUserPromptContent` appends a ` *` marker to any action ID present in `salientActionIds`. The system prompt defines the meaning of `*` at the selected consciousness level.
+## 6) Request and response flow
 
-When the LLM responds, the backend normalizes the returned `action` by stripping trailing `*` characters before validating it.
+The client sends a decision request to the backend, then receives a normalized action decision.
 
-## API contract (Phaser → backend → LLM → Phaser)
+### Dev Notes
+- Endpoint: `POST /api/decision`
+- Request includes needs, traits, available actions, highlighted actions, and recent history context
+- Response includes `action`, `thought`, `reason`, and `decision_factors`
+- Backend strips trailing `*` from returned action before validation
 
-### Request payload: `chooseNextActionAsync`
+## 7) Fallback behavior if decision fails
 
-The browser posts to `POST /api/decision` with (key fields):
-- `consciousnessLevel`
-- `needs`: raw numeric needs state
-- `traits`: default trait set
-- `traitTensions`: optional (Cosmic Blueprint breakdown)
-- `availableActions`: action IDs (alphabetical at the client)
-- `salientActionIds`: deduped + filtered at the server
-- `playerSignal`: usually `null` from this decision loop unless another call path provides it
-- `playerSignalNote`: the snapshot note (or `null`)
-- `feltOutcomeLine`: optional context (or `null`)
-- `recentFeltOutcomes`: last N felt outcome lines
-- `loopHint`: short hint derived from recent actions
-- `patternSummaries`: short memory summaries
-- `recentActions`: last actions (count depends on consciousness level)
-- `significantMemory`: only for higher consciousness levels
+There are two safety paths:
+- if the request fails entirely, avatar picks a random allowed action
+- if model output is invalid, backend picks the first valid action alphabetically
 
-`recentActions` window size depends on consciousness level:
-- level `<= 0`: 3
-- level `== 1`: 5
-- level `>= 4`: 10
-- otherwise: 8
+### Dev Notes
+- Client fallback: `pickUniformRandomActionId()`
+- Server invalid-action fallback: `availableActions[0]` after sorting
 
-### Backend normalization: sorting + stripping `*`
+## 8) How this links to awareness and UI
 
-On the server:
-- `availableActions` is sorted alphabetically before building the prompt
-- `salientActionIds` is filtered to be within the allowed `availableActions`
-- the returned `action` has trailing `*` stripped before validation
-- if the returned `action` is invalid, fallback is `availableActions[0]` (the first alphabetically)
+A decision immediately affects awareness logic and reasoning display:
+- landed player influence can bump awareness
+- ignored influence can penalize
+- action orientation and stuck-loop status apply on completion
 
-### Response payload: backend → game
-
-The normalized decision object includes:
-- `action` (string action ID, no `*`)
-- `thought` and `reason` (strings)
-- `decision_factors` with fields like `mode` and `player_signal_used`
-
-The engine stores the last decision for downstream awareness updates and reasoning UI.
-
-## Fallback behavior (what happens when LLM fails)
-
-Two different fallbacks exist:
-
-### 1) Client-side fetch failure (no LLM result)
-
-If the request to `/api/decision` fails (HTTP/network/throw):
-- the engine chooses an action with `pickUniformRandomActionId()` over the allowed action list
-- it also sets reasoning text to indicate “Fallback (no LLM)”
-
-This fallback is **uniform random**, not weighted.
-
-### 2) Server-side invalid LLM output (bad `action`)
-
-If the LLM returns an action that doesn’t validate:
-- the backend falls back to `availableActions[0]` after sorting
-
-## Awareness + UI side-effects of a decision
-
-The decision influences other systems immediately:
-- If the decision includes player influence (`decision_factors.player_signal_used`) and the chosen action intersects any `salientActionIds`, the engine applies a player-signal awareness bump/penalty at decision time.
-- On action completion, the engine applies the LLM’s `decision_factors.mode` to update `awarenessDynamicBuffer`.
-
-UI receives reasoning text and cooldown display via `room-ui-state`.
-
-## Execution flow (end-to-end)
-
-```text
-Decision tick
-  ↓
-Snapshot note + salience targets
-  ↓
-POST /api/decision
-  ↓
-LLM returns JSON (normalized: strip `*`, validate/fallback)
-  ↓
-Execute action in the Room
-  ↓
-Action completes → update awareness via decision_factors.mode
-```
+### Dev Notes
+- Decision-time awareness uses `decision_factors.player_signal_used`
+- Completion-time awareness uses `decision_factors.mode` + server-derived `decision_factors.unconscious_loop`
+- UI updates through `room-ui-state` plus in-world thinking indicator
 

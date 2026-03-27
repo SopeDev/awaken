@@ -45,13 +45,23 @@ import {
   createEmptyAttunementRecord,
   objectTypeHasHiddenDepth
 } from '../playerSignals/objectAttunement.js'
-import { getSynchronicityNoteForAction } from '../playerSignals/synchronicityCopy.js'
+import { getAttuneNoteForAction } from '../playerSignals/synchronicityCopy.js'
 import {
   BASELINE_AWARENESS_MAX,
   computeBaselineAwarenessBreakdown,
   getBaseModeAwarenessDelta,
-  scaleModeDeltaByBaseline
+  scaleModeDeltaByBaseline,
+  UNCONSCIOUS_LOOP_BASE_AWARENESS_DELTA
 } from '../awareness/index.js'
+import {
+  BODILY_PRIMARY_KEY_SET,
+  NEED_FAILURE_RESULTS,
+  NEED_RESULT_GOT_WORSE,
+  NEED_RESULT_HELPED_A_LITTLE,
+  NEED_RESULT_HELPED_A_LOT,
+  NEED_RESULT_NO_MEANINGFUL_HELP,
+  NEED_RESULT_NOT_APPLICABLE
+} from './needOutcomeLabels.js'
 
 const GAME_MINUTES_PER_REAL_SECOND = 1 / 60
 // Base multiplier is 1. Game speed is controlled at runtime via Phaser `timeScale`.
@@ -73,25 +83,25 @@ const AWARENESS_CLARITY_THRESHOLD = 80
 /** Seconds-like smoothing; higher = snappier toward target baseline. */
 const BASELINE_AWARENESS_SMOOTH_TAU_MS = 180
 /** Extra awareness gained when the LLM indicates player-signal genuinely influenced choice. */
-const PLAYER_SIGNAL_USED_AWARENESS_BONUS = 5
+const PLAYER_SIGNAL_USED_AWARENESS_BONUS = 3
+/** Additional awareness when the chosen action was also salient (directional cue) in the prompt. */
+const PLAYER_SIGNAL_SALIENT_CHOICE_OVERLAP_BONUS = 2
 /** Awareness penalty when the LLM says player-signal was ignored. */
 const PLAYER_SIGNAL_IGNORED_AWARENESS_PENALTY = -2
 
-const NEED_RESULT_HELPED_A_LOT = 'helped_a_lot'
-const NEED_RESULT_HELPED_A_LITTLE = 'helped_a_little'
-const NEED_RESULT_NO_MEANINGFUL_HELP = 'no_meaningful_help'
-const NEED_RESULT_GOT_WORSE = 'got_worse'
-const NEED_RESULT_NOT_APPLICABLE = 'not_applicable'
-const NEED_FAILURE_RESULTS = new Set([NEED_RESULT_NO_MEANINGFUL_HELP, NEED_RESULT_GOT_WORSE])
 const PSYCHOLOGICAL_MISMATCH_NEEDS = new Set(['stress', 'boredom', 'loneliness'])
 
 /** Newest-first log entries: single newline between rows (no rule character). */
 const REASONING_LOG_SEPARATOR = '\n'
+/** Gameplay pacing floor: wait this long after action completion before next LLM decision starts. */
+const MIN_MS_BETWEEN_ACTION_AND_NEXT_DECISION = 3000
 
 const buildClamp = (v, min, max) => Math.max(min, Math.min(max, v))
 const getHabituationCounterKey = (actionId, needKey) => `${actionId}:${needKey}`
 const RECENT_FELT_OUTCOMES_MAX = 12
+const RECENT_COMPLETION_EVALS_MAX = 12
 const RECENT_PATTERN_SUMMARIES_MAX = 8
+const NEED_OUTCOME_APPLICABLE_MIN = 15
 
 function buildRealWorldTimestamp(sessionStartedAtMs) {
   const nowMs = Date.now()
@@ -146,11 +156,11 @@ function classifyNeedOutcome(needKey, needsBefore, needsAfter) {
   const before = Number(needsBefore?.[needKey])
   const after = Number(needsAfter?.[needKey])
   if (!Number.isFinite(before) || !Number.isFinite(after)) return NEED_RESULT_NOT_APPLICABLE
+  if (before < NEED_OUTCOME_APPLICABLE_MIN) return NEED_RESULT_NOT_APPLICABLE
   const delta = after - before
-  if (delta <= -10) return NEED_RESULT_HELPED_A_LOT
-  if (delta <= -4) return NEED_RESULT_HELPED_A_LITTLE
-  if (delta > 0) return NEED_RESULT_GOT_WORSE
-  if (Math.abs(delta) < 4) return NEED_RESULT_NO_MEANINGFUL_HELP
+  if (delta <= -20) return NEED_RESULT_HELPED_A_LOT
+  if (delta <= -10) return NEED_RESULT_HELPED_A_LITTLE
+  if (delta >= 4) return NEED_RESULT_GOT_WORSE
   return NEED_RESULT_NO_MEANINGFUL_HELP
 }
 
@@ -169,10 +179,23 @@ function isPsychologicalNeed(needKey) {
 function makeDeltaText(before, after) {
   const delta = Number(after) - Number(before)
   if (!Number.isFinite(delta)) return 'did not really help'
-  if (delta <= -10) return 'helped a lot'
-  if (delta <= -4) return 'helped a little'
-  if (delta > 0) return 'made it worse'
+  if (delta <= -20) return 'helped a lot'
+  if (delta <= -10) return 'helped a little'
+  if (delta >= 4) return 'made it worse'
   return 'did not really help'
+}
+
+function needOutcomeClause(result, needLabel) {
+  if (result === NEED_RESULT_HELPED_A_LOT || result === NEED_RESULT_HELPED_A_LITTLE) {
+    return `helped with ${needLabel}`
+  }
+  if (result === NEED_RESULT_GOT_WORSE) {
+    return `made ${needLabel} worse`
+  }
+  if (result === NEED_RESULT_NO_MEANINGFUL_HELP) {
+    return `did not help with ${needLabel}`
+  }
+  return 'did not really change how I felt'
 }
 
 function buildLoopHintFromRecentActions(recentActionIds) {
@@ -206,6 +229,8 @@ function buildFeltOutcomeTail(primaryNeedKey, secondaryNeedKey, primaryResult, s
   }
 
   if (hasPrimaryNeed && hasSecondaryNeed && primaryNeedKey !== secondaryNeedKey) {
+    const primaryApplicable = primaryResult !== NEED_RESULT_NOT_APPLICABLE
+    const secondaryApplicable = secondaryResult !== NEED_RESULT_NOT_APPLICABLE
     const pText = makeDeltaText(needsBefore?.[primaryNeedKey], needsAfter?.[primaryNeedKey])
     const sText = makeDeltaText(needsBefore?.[secondaryNeedKey], needsAfter?.[secondaryNeedKey])
     const primaryLabel = NEED_LABELS[primaryNeedKey]?.toLowerCase() || primaryNeedKey
@@ -216,6 +241,16 @@ function buildFeltOutcomeTail(primaryNeedKey, secondaryNeedKey, primaryResult, s
       if (deltaText === 'did not really help') return `did not help with ${label}`
       if (deltaText === 'made it worse') return `made ${label} worse`
       return `${deltaText} with ${label}`
+    }
+
+    if (!primaryApplicable && !secondaryApplicable) {
+      return 'it did not really change how I felt.'
+    }
+    if (primaryApplicable && !secondaryApplicable) {
+      return `it ${needOutcomeClause(primaryResult, primaryLabel)}. Otherwise it did not really change how I felt.`
+    }
+    if (!primaryApplicable && secondaryApplicable) {
+      return `it ${needOutcomeClause(secondaryResult, secondaryLabel)}. Otherwise it did not really change how I felt.`
     }
 
     if (isSuccessResult(primaryResult) && isFailureResult(secondaryResult)) {
@@ -239,6 +274,8 @@ function buildFeltOutcomeTail(primaryNeedKey, secondaryNeedKey, primaryResult, s
   }
 
   const needKey = primaryNeedKey || secondaryNeedKey
+  const result = hasPrimaryNeed ? primaryResult : secondaryResult
+  if (result === NEED_RESULT_NOT_APPLICABLE) return 'it did not really change how I felt.'
   const label = NEED_LABELS[needKey]?.toLowerCase() || needKey
   const text = makeDeltaText(needsBefore?.[needKey], needsAfter?.[needKey])
   if (text === 'did not really help') return `it did not help with ${label}.`
@@ -307,6 +344,8 @@ export function getCharacterEngine() {
     _lastPostActionEvaluation: null,
     _pendingFeltOutcomeLine: null,
     _recentFeltOutcomeLines: [],
+    /** Newest last: { actionId, primary, primaryResult } from completed actions for server-derived unconscious_loop. */
+    _recentCompletionEvaluations: [],
     _recentPatternSummaries: [],
 
     // Snapshot at action start.
@@ -332,14 +371,18 @@ export function getCharacterEngine() {
     _directionalCooldownUntil: 0,
     _intuitionCooldownUntil: 0,
     _syncCooldownUntil: 0,
-    /** @type {Record<string, { isAttuned: boolean, attunedAtMs: number|null, synchronicityConsumed: boolean }>} */
+    /** @type {Record<string, { isAttuned: boolean, attunedAtMs: number|null, attuneConsumed: boolean }>} */
     _objectAttunementByTypeId: {},
     /** Which discovery chain applies while in Room (future: per-layout id). */
     _roomDiscoveryChainId: 'tutorial',
     /** @type {Set<string>|null} actions withheld until discovery unlocks; null = gating off */
     _roomDiscoveryLockedActions: null,
-    /** @type {Set<string>} one-time synchronicity discovery steps already consumed */
+    /** @type {Set<string>} one-time Attune discovery steps already consumed */
     _roomDiscoveryConsumedSteps: new Set(),
+    /** Phaser time.now when the last action completed (for post-action quiet window). */
+    _lastActionCompletedAtMs: -Infinity,
+    /** One-shot override: directional pull can force immediate post-action decision. */
+    _pendingImmediateDecisionFromDirectional: false,
 
     attachScene(scene) {
       this.scene = scene
@@ -378,6 +421,10 @@ export function getCharacterEngine() {
       this._scheduleDecisionLoopTick(this._aiLoopToken, delayMs)
     },
 
+    isDecisionInFlight() {
+      return this._decisionInFlight === true
+    },
+
     _snapshotPendingForDecision() {
       const note = this._pendingPlayerSignalNote
       this._pendingPlayerSignalNote = null
@@ -410,7 +457,7 @@ export function getCharacterEngine() {
         const rec = this._ensureAttunementRecord(id)
         rec.isAttuned = true
         rec.attunedAtMs = ts
-        rec.synchronicityConsumed = false
+        rec.attuneConsumed = false
       }
     },
 
@@ -419,7 +466,7 @@ export function getCharacterEngine() {
       const rec = this._objectAttunementByTypeId[id]
       if (!rec) return
       rec.isAttuned = false
-      rec.synchronicityConsumed = true
+      rec.attuneConsumed = true
       this._syncAttunementOverlaysToScene()
     },
 
@@ -468,7 +515,7 @@ export function getCharacterEngine() {
       if (now < this._directionalCooldownUntil) return
 
       const phase = room.getAvatarActionPhase()
-      if (phase === AVATAR_PHASE.PERFORMING) return
+      if (phase === AVATAR_PHASE.PERFORMING || phase === AVATAR_PHASE.PROCESSING) return
 
       const cardinal = directionKeyToCardinal(key)
       if (!cardinal) return
@@ -494,15 +541,10 @@ export function getCharacterEngine() {
         sectorActionIds: ids,
         messageInjected: this._pendingPlayerSignalNote
       })
+      this._pendingImmediateDecisionFromDirectional = true
       this.emitRoomUiImmediate()
 
-      if (phase === AVATAR_PHASE.WALKING) {
-        this.requestDecisionSoon(0)
-        return
-      }
-      if (phase === AVATAR_PHASE.AWAITING && !this._decisionInFlight) {
-        this.requestDecisionSoon(0)
-      }
+      this.requestDecisionSoon(0)
     },
 
     onPlayerIntuitionPulse(room) {
@@ -511,6 +553,8 @@ export function getCharacterEngine() {
       if (now < this._intuitionCooldownUntil) return
 
       const phase = room.getAvatarActionPhase()
+      if (phase === AVATAR_PHASE.PROCESSING) return
+
       const px = room.player.x
       const py = room.player.y
       const nearbyTypes = getAdjacentObjectTypeIds(px, py, room.mapX, room.mapY, ROOM_OBJECTS)
@@ -534,7 +578,7 @@ export function getCharacterEngine() {
       const deepNearby = nearbyTypes.filter((id) => objectTypeHasHiddenDepth(id))
       const deepToAttune = deepNearby.filter((id) => {
         const rec = this._objectAttunementByTypeId[String(id)]
-        return !rec || !rec.isAttuned
+        return !rec || (!rec.isAttuned && !rec.attuneConsumed)
       })
       const shallowNearby = nearbyTypes.filter((id) => !objectTypeHasHiddenDepth(id))
 
@@ -599,7 +643,7 @@ export function getCharacterEngine() {
       }
     },
 
-    onPlayerSynchronicity(room) {
+    onPlayerAttune(room) {
       if (!this.scene || room !== this.scene || !room.player) return
       const now = this.scene.time.now
       if (now < this._syncCooldownUntil) return
@@ -612,11 +656,11 @@ export function getCharacterEngine() {
       const objectTypeId = actionMeta.objectTypeId
 
       if (!objectTypeId || !objectTypeHasHiddenDepth(objectTypeId)) {
-        if (typeof room.playSynchronicityBlockedFeedback === 'function') {
-          room.playSynchronicityBlockedFeedback()
+        if (typeof room.playAttuneBlockedFeedback === 'function') {
+          room.playAttuneBlockedFeedback()
         }
         this._logSignal({
-          type: 'synchronicity',
+          type: 'attune',
           phase: AVATAR_PHASE.PERFORMING,
           currentAction: actionId,
           objectTypeId: objectTypeId ?? null,
@@ -630,11 +674,11 @@ export function getCharacterEngine() {
 
       const rec = this._objectAttunementByTypeId[String(objectTypeId)]
       if (!rec || !rec.isAttuned) {
-        if (typeof room.playSynchronicityBlockedFeedback === 'function') {
-          room.playSynchronicityBlockedFeedback()
+        if (typeof room.playAttuneBlockedFeedback === 'function') {
+          room.playAttuneBlockedFeedback()
         }
         this._logSignal({
-          type: 'synchronicity',
+          type: 'attune',
           phase: AVATAR_PHASE.PERFORMING,
           currentAction: actionId,
           objectTypeId,
@@ -653,7 +697,7 @@ export function getCharacterEngine() {
       const perception = Number(traits.perception ?? 50)
       const boredom = Number(this.needsState.getNeeds().boredom ?? 0)
 
-      // Synchronicity availability: baseline 50% + dynamic awareness amount.
+      // Attune availability: baseline 50% + dynamic awareness amount.
       // Dynamic awareness is stored in `awarenessDynamicBuffer` and is in the 0..50 range.
       const dynamicAwarenessLevel = Number(this.awarenessDynamicBuffer) || 0
       const dynamicScale = dynamicAwarenessLevel / BASELINE_AWARENESS_MAX
@@ -668,7 +712,7 @@ export function getCharacterEngine() {
 
       if (!noticed) {
         this._logSignal({
-          type: 'synchronicity',
+          type: 'attune',
           phase: AVATAR_PHASE.PERFORMING,
           currentAction: actionId,
           objectTypeId: actionMeta.objectTypeId ?? null,
@@ -681,12 +725,12 @@ export function getCharacterEngine() {
         return
       }
 
-      this.flushNegativePendingDeltasOnSynchronicityInterrupt()
-      if (typeof room.cancelOngoingInteractionForSynchronicity === 'function') {
-        room.cancelOngoingInteractionForSynchronicity()
+      this.flushNegativePendingDeltasOnAttuneInterrupt()
+      if (typeof room.cancelOngoingInteractionForAttune === 'function') {
+        room.cancelOngoingInteractionForAttune()
       }
 
-      let noteMsg = getSynchronicityNoteForAction(actionId)
+      let noteMsg = getAttuneNoteForAction(actionId)
       let newlyUnlockedActionIds = []
       const discoveryStep = findMatchingDiscoveryStep(
         this._roomDiscoveryConsumedSteps,
@@ -709,7 +753,7 @@ export function getCharacterEngine() {
         this._clearAttunementAfterSuccessfulDeepSync(objectTypeId)
       }
 
-      // Show the synchronicity “felt thought” in the reasoning UI immediately.
+      // Show the Attune "felt thought" in the reasoning UI immediately.
       if (typeof noteMsg === 'string' && noteMsg.trim()) {
         const clockLabel = formatInGameClock(this._gameClockMinutes)
         const entryText = `${clockLabel}:  ${noteMsg.trim()}`
@@ -721,7 +765,7 @@ export function getCharacterEngine() {
 
       this._setPendingPlayerNote(noteMsg)
 
-      // Only star actions when synchronicity unlocked them for the first time.
+      // Only star actions when Attune unlocked them for the first time.
       if (newlyUnlockedActionIds.length) {
         this._pendingSalientActionIds = [
           ...new Set([...this._pendingSalientActionIds, ...newlyUnlockedActionIds].map(String))
@@ -729,7 +773,7 @@ export function getCharacterEngine() {
       }
 
       this._logSignal({
-        type: 'synchronicity',
+        type: 'attune',
         phase: AVATAR_PHASE.PERFORMING,
         currentAction: actionId,
         objectTypeId: actionMeta.objectTypeId ?? null,
@@ -759,6 +803,16 @@ export function getCharacterEngine() {
         return
       }
 
+      const nowMs = Number(this.scene?.time?.now) || 0
+      const elapsedSinceActionEnd = nowMs - (Number(this._lastActionCompletedAtMs) || -Infinity)
+      const bypassPostActionDelay = this._pendingImmediateDecisionFromDirectional === true
+      if (elapsedSinceActionEnd < MIN_MS_BETWEEN_ACTION_AND_NEXT_DECISION && !bypassPostActionDelay) {
+        const remaining = Math.max(0, MIN_MS_BETWEEN_ACTION_AND_NEXT_DECISION - elapsedSinceActionEnd)
+        this._scheduleDecisionLoopTick(token, remaining)
+        return
+      }
+      this._pendingImmediateDecisionFromDirectional = false
+
       if (this._decisionInFlight) {
         this._scheduleDecisionLoopTick(token, 250)
         return
@@ -768,6 +822,7 @@ export function getCharacterEngine() {
       const loopHint = buildLoopHintFromRecentActions(this._recentActionIds)
 
       this._decisionInFlight = true
+      this.emitRoomUiImmediate()
       try {
         let actionId = null
         let usedLLM = false
@@ -816,7 +871,11 @@ export function getCharacterEngine() {
               }
             : null
           if (hasAnySalientActions && decisionForAwareness) {
-            this._applyPlayerSignalDynamicAwarenessOnDecision(decisionForAwareness)
+            const salientAvailable = (salientActionIds || [])
+              .map(String)
+              .filter((id) => availableActionsForDecision?.includes(id))
+            const chosenIsSalient = salientAvailable.includes(String(actionId))
+            this._applyPlayerSignalDynamicAwarenessOnDecision(decisionForAwareness, { chosenIsSalient })
             this.emitRoomUiImmediate()
           }
 
@@ -839,6 +898,7 @@ export function getCharacterEngine() {
         }
       } finally {
         this._decisionInFlight = false
+        this.emitRoomUiImmediate()
       }
 
       this._scheduleDecisionLoopTick(token, AI_DECISION_INTERVAL_MS)
@@ -852,6 +912,17 @@ export function getCharacterEngine() {
         typeof this.scene.getAvatarActionPhase === 'function'
           ? this.scene.getAvatarActionPhase()
           : 'awaiting'
+      const currentActionId = this.scene?._interactionActionId
+      const currentActionMeta = currentActionId ? ACTIONS[currentActionId] : null
+      const currentObjectTypeId = currentActionMeta?.objectTypeId
+      const currentAttunementRec = currentObjectTypeId
+        ? this._objectAttunementByTypeId[String(currentObjectTypeId)]
+        : null
+      const attuneAvailable =
+        avatarPhase === AVATAR_PHASE.PERFORMING &&
+        !!currentObjectTypeId &&
+        objectTypeHasHiddenDepth(currentObjectTypeId) &&
+        !!currentAttunementRec?.isAttuned
 
       EventBus.emit('room-ui-state', {
         needs: { ...needs },
@@ -859,7 +930,7 @@ export function getCharacterEngine() {
         awareness: this.awareness,
         awarenessBaseline: this.baselineAwareness,
         awarenessDynamicBuffer: this.awarenessDynamicBuffer,
-        awarenessModel: 'baseline_plus_mode_dynamic_v1',
+        awarenessModel: 'baseline_plus_mode_and_loop_dynamic_v2',
         awarenessStates: {
           entrapped: this.isEntrapped,
           clear: this.isClear
@@ -872,8 +943,9 @@ export function getCharacterEngine() {
         signalCooldownsMs: {
           directional: Math.max(0, this._directionalCooldownUntil - now),
           intuition: Math.max(0, this._intuitionCooldownUntil - now),
-          synchronicity: Math.max(0, this._syncCooldownUntil - now)
+          attune: Math.max(0, this._syncCooldownUntil - now)
         },
+        attuneAvailable,
         gameClockDisplay: formatInGameClock(this._gameClockMinutes)
       })
     },
@@ -904,8 +976,7 @@ export function getCharacterEngine() {
     },
 
     /**
-     * Dynamic awareness layer: `decision_factors.mode` only, scaled by baseline/50.
-     * Outcome-agnostic.
+     * Dynamic awareness: `decision_factors.mode` + optional server-derived `unconscious_loop`, scaled by baseline/50.
      * @returns {object} debug fields for logging
      */
     _applyModeDynamicAwarenessOnActionComplete(decision, needsAfter) {
@@ -918,14 +989,21 @@ export function getCharacterEngine() {
 
       const rawMode = decision?.decision_factors?.mode
       const mode = typeof rawMode === 'string' ? rawMode.trim() : null
-      const baseDelta = mode ? getBaseModeAwarenessDelta(mode) : null
+      const modeBaseDelta = mode ? getBaseModeAwarenessDelta(mode) : null
+      const unconsciousLoop = decision?.decision_factors?.unconscious_loop === true
+      const loopDelta = unconsciousLoop ? UNCONSCIOUS_LOOP_BASE_AWARENESS_DELTA : 0
+      const combinedBaseDelta =
+        (typeof modeBaseDelta === 'number' ? modeBaseDelta : 0) + loopDelta
 
-      if (baseDelta == null) {
+      if (modeBaseDelta == null && loopDelta === 0) {
         this.awarenessDynamicBuffer = buildClamp(prevSafe, 0, baselineForScale)
         return {
           modeApplied: false,
+          unconsciousLoopApplied: false,
           mode: mode || null,
           baseModeDelta: null,
+          unconsciousLoopDelta: 0,
+          combinedBaseDelta: 0,
           baselineAwarenessAtApply: baselineForScale,
           baselineScale,
           scaledModeDelta: null,
@@ -936,13 +1014,16 @@ export function getCharacterEngine() {
         }
       }
 
-      const scaledDelta = scaleModeDeltaByBaseline(baseDelta, baselineForScale)
+      const scaledDelta = scaleModeDeltaByBaseline(combinedBaseDelta, baselineForScale)
       this.awarenessDynamicBuffer = buildClamp(prevSafe + scaledDelta, 0, baselineForScale)
 
       return {
-        modeApplied: true,
-        mode,
-        baseModeDelta: baseDelta,
+        modeApplied: modeBaseDelta != null,
+        unconsciousLoopApplied: unconsciousLoop,
+        mode: mode || null,
+        baseModeDelta: modeBaseDelta,
+        unconsciousLoopDelta: loopDelta,
+        combinedBaseDelta,
         baselineAwarenessAtApply: baselineForScale,
         baselineScale,
         scaledModeDelta: scaledDelta,
@@ -955,9 +1036,10 @@ export function getCharacterEngine() {
     /**
      * Player-signal awareness bump is applied at decision time.
      * (Only call this when there were any '*' actions in the prompt.)
+     * @param {{ chosenIsSalient?: boolean }} [options]
      * @returns {object|null} debug fields for logging
      */
-    _applyPlayerSignalDynamicAwarenessOnDecision(decision) {
+    _applyPlayerSignalDynamicAwarenessOnDecision(decision, { chosenIsSalient = false } = {}) {
       const rawPlayerSignalUsed = decision?.decision_factors?.player_signal_used
       if (typeof rawPlayerSignalUsed !== 'boolean') return null
 
@@ -966,9 +1048,13 @@ export function getCharacterEngine() {
       const baselineForScale = breakdown.baselineAwareness
       const baselineScale = baselineForScale / BASELINE_AWARENESS_MAX
 
-      const delta =
-        (rawPlayerSignalUsed ? PLAYER_SIGNAL_USED_AWARENESS_BONUS : PLAYER_SIGNAL_IGNORED_AWARENESS_PENALTY) *
-        baselineScale
+      let rawDelta = rawPlayerSignalUsed
+        ? PLAYER_SIGNAL_USED_AWARENESS_BONUS
+        : PLAYER_SIGNAL_IGNORED_AWARENESS_PENALTY
+      if (rawPlayerSignalUsed && chosenIsSalient) {
+        rawDelta += PLAYER_SIGNAL_SALIENT_CHOICE_OVERLAP_BONUS
+      }
+      const delta = rawDelta * baselineScale
 
       const prevDynamic = Number(this.awarenessDynamicBuffer)
       const prevSafe = Number.isFinite(prevDynamic) ? prevDynamic : 0
@@ -986,6 +1072,8 @@ export function getCharacterEngine() {
       return {
         playerSignalApplied: true,
         playerSignalUsed: rawPlayerSignalUsed,
+        chosenIsSalient,
+        salientOverlapBonusApplied: Boolean(rawPlayerSignalUsed && chosenIsSalient),
         playerSignalDelta: delta,
         baselineAwarenessAtApply: baselineForScale,
         baselineScale,
@@ -1028,7 +1116,7 @@ export function getCharacterEngine() {
         this._lastLoggedAwarenessMeter = logStep
         console.log('[awareness]', {
           type: 'awareness_recompute',
-          model: 'baseline_plus_mode_dynamic_v1',
+          model: 'baseline_plus_mode_and_loop_dynamic_v2',
           baselineAwareness: this.baselineAwareness,
           awarenessDynamicBuffer: this.awarenessDynamicBuffer,
           finalAwarenessSmoothed: this.awareness,
@@ -1068,15 +1156,30 @@ export function getCharacterEngine() {
         pending[key] = remaining - actual
         if (Math.abs(pending[key]) < 0.5) delete pending[key]
       }
+
+      // End bodily-care actions early once their bodily target is fully satisfied.
+      const activeActionId = this.scene?._interactionActionId
+      if (!activeActionId || !this.scene?.isExecutingAction) return
+      const targets = ACTIONS[activeActionId]?.bodilyTargets
+      if (!Array.isArray(targets) || targets.length === 0) return
+      const bodilyTarget = targets.find((k) => BODILY_PRIMARY_KEY_SET.has(String(k)))
+      if (!bodilyTarget) return
+
+      const currentNeed = Number(needs[bodilyTarget])
+      if (Number.isFinite(currentNeed) && currentNeed <= 0) {
+        if (typeof this.scene.finishAction === 'function') {
+          this.scene.finishAction(activeActionId)
+        }
+      }
     },
 
     /**
-     * Successful synchronicity ends the action early: apply any still-pending need deltas
+     * Successful Attune ends the action early: apply any still-pending need deltas
      * whose total for this action was negative (relief), and drop the rest (e.g. any
      * positive deltas like fatigue) without applying. Uses whatever ACTION_EFFECTS the
      * current action has — same rules for all actions on hasHiddenDepth objects.
      */
-    flushNegativePendingDeltasOnSynchronicityInterrupt() {
+    flushNegativePendingDeltasOnAttuneInterrupt() {
       const needs = this.needsState.getNeeds()
       const pending = this.pendingNeedDeltas
       const totalDeltas = this.pendingNeedTotalDeltas
@@ -1155,6 +1258,7 @@ export function getCharacterEngine() {
 
     onActionCompleted(actionId) {
       this._completedDecisionCount += 1
+      this._lastActionCompletedAtMs = Number(this.scene?.time?.now) || 0
 
       // Ensure pending need arrows don't linger after the action ends.
       // If there is any remaining "pending" delta (action ended early / rounding),
@@ -1279,6 +1383,14 @@ export function getCharacterEngine() {
         if (this._recentFeltOutcomeLines.length > RECENT_FELT_OUTCOMES_MAX) {
           this._recentFeltOutcomeLines = this._recentFeltOutcomeLines.slice(-RECENT_FELT_OUTCOMES_MAX)
         }
+        this._recentCompletionEvaluations.push({
+          actionId: postActionEvaluation.actionId,
+          primary: postActionEvaluation.primary,
+          primaryResult: postActionEvaluation.primaryResult
+        })
+        if (this._recentCompletionEvaluations.length > RECENT_COMPLETION_EVALS_MAX) {
+          this._recentCompletionEvaluations = this._recentCompletionEvaluations.slice(-RECENT_COMPLETION_EVALS_MAX)
+        }
       } else {
         this._lastPostActionEvaluation = null
       }
@@ -1316,7 +1428,7 @@ export function getCharacterEngine() {
         const realWorldTimestamp = buildRealWorldTimestamp(this._realSessionStartedAtMs)
         const awarenessLogPayload = {
           type: 'action_complete',
-          model: 'baseline_plus_mode_dynamic_v1',
+          model: 'baseline_plus_mode_and_loop_dynamic_v2',
           actionId,
           level: levelAtAction,
           llmReasoning: buildLlmReasoningPayload(decision, this._activeActionReasonText),
@@ -1335,7 +1447,7 @@ export function getCharacterEngine() {
           modeDynamicLayer: {
             ...modeAwarenessDebug,
             note:
-              'Baseline from needs only; dynamic buffer from decision_factors.mode only, scaled by baselineAwareness/50'
+              'Baseline from needs only; dynamic buffer from decision_factors.mode plus server-derived unconscious_loop, scaled by baselineAwareness/50'
           },
           baselineAwarenessInstant: this.baselineAwareness,
           awarenessDynamicBuffer: this.awarenessDynamicBuffer,
@@ -1412,6 +1524,7 @@ export function getCharacterEngine() {
           playerSignalNote: playerSignalNote ?? null,
           feltOutcomeLine: feltOutcomeLine ?? null,
           recentFeltOutcomes: Array.isArray(recentFeltOutcomes) ? recentFeltOutcomes : [],
+          recentCompletionEvaluations: this._recentCompletionEvaluations.slice(-RECENT_COMPLETION_EVALS_MAX),
           loopHint: loopHint ?? null,
           patternSummaries: Array.isArray(patternSummaries) ? patternSummaries : [],
           recentActions: this._recentActionIds.slice(-recentActionsLimit),

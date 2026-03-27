@@ -61,7 +61,7 @@ function IconIntuition() {
   )
 }
 
-function IconSynchronicity() {
+function IconAttune() {
   return (
     <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden style={{ opacity: 0.9 }}>
       <path
@@ -353,8 +353,9 @@ function AbilitySlot({
 
 /**
  * @param {{
- *   signalCooldownsMs?: { directional?: number, intuition?: number, synchronicity?: number },
+ *   signalCooldownsMs?: { directional?: number, intuition?: number, attune?: number },
  *   avatarPhase?: string
+ *   attuneAvailable?: boolean
  * }} props
  */
 export function AbilityBar({
@@ -362,25 +363,33 @@ export function AbilityBar({
   avatarPhase = AVATAR_PHASE.AWAITING,
   hudHeight = 200,
   consciousnessLevel = 0,
-  awarenessDynamicBuffer = 0
+  awarenessDynamicBuffer = 0,
+  attuneAvailable = false
 }) {
   const d = Number(signalCooldownsMs.directional) || 0
   const i = Number(signalCooldownsMs.intuition) || 0
-  const s = Number(signalCooldownsMs.synchronicity) || 0
+  const a = Number(signalCooldownsMs.attune) || 0
 
-  const directionalPhaseLocked = avatarPhase === AVATAR_PHASE.PERFORMING
-  const synchronicityPhaseLocked =
-    avatarPhase === AVATAR_PHASE.AWAITING || avatarPhase === AVATAR_PHASE.WALKING
+  const waitingOnDecision = avatarPhase === AVATAR_PHASE.PROCESSING
+  const directionalPhaseLocked =
+    waitingOnDecision || avatarPhase === AVATAR_PHASE.PERFORMING
+  const intuitionPhaseLocked = waitingOnDecision
+  const attunePhaseLocked =
+    waitingOnDecision ||
+    avatarPhase === AVATAR_PHASE.AWAITING ||
+    avatarPhase === AVATAR_PHASE.WALKING
 
   const dyn = Math.max(0, Math.min(BASELINE_AWARENESS_MAX, Number(awarenessDynamicBuffer) || 0))
   const dynScale = dyn / BASELINE_AWARENESS_MAX
-  const synchronicityNoticeP = Math.max(0, Math.min(1, 0.5 + dynScale))
-  const synchronicityChancePct = Math.round(synchronicityNoticeP * 100)
+  const attuneNoticeP = Math.max(0, Math.min(1, 0.5 + dynScale))
+  const synchronicityChancePct = Math.round(attuneNoticeP * 100)
 
   const dirConsciousnessLine = `Affected by: avatar consciousness level. Current = ${consciousnessLevel}.`
   const directionalCanOnlyUseLine =
-    'Can only use when you are not mid-action (locked while performing an action).'
-  const synchronicityCanOnlyUseLine = 'Can only use while you are actively performing an action.'
+    'Can only use when you are not mid-action.\nCannot use while a decision is being chosen.'
+  const intuitionCanOnlyUseLine = 'Cannot use while a decision is being chosen.'
+  const attuneCanOnlyUseLine =
+    'Can only use while you are actively performing an attuned action.\nCannot use while a decision is being chosen.'
 
   return (
     <div
@@ -473,22 +482,23 @@ export function AbilityBar({
         keybind="Space"
         tooltip={tooltip(
           'Intuition Pulse',
-          'Attunes nearby objects so hidden meaning becomes visible. Area effect: 3x3 tiles around your avatar. Hidden-depth objects gain a glow, and their actions are treated as important next time you decide. If there are no eligible hidden-depth objects, you only get brief feedback and no attunement is added.'
+          `Reveals hidden meaning in nearby objects. Area effect: 3x3 tiles around your avatar. Eligible hidden-depth objects glow, and their actions are treated as more important the next time your avatar makes an action choice. If no eligible hidden-depth objects are nearby, you only receive brief feedback.\n\n${intuitionCanOnlyUseLine}`
         )}
         onActivate={() => EventBus.emit('ability-signal', { type: 'intuition' })}
         icon={<IconIntuition />}
+        disabledByPhase={intuitionPhaseLocked}
       />
       <AbilitySlot
-        remainingMs={s}
+        remainingMs={a}
         totalMs={SYNCHRONICITY_COOLDOWN_MS}
         keybind="E"
         tooltip={tooltip(
-          'Synchronicity',
-          `Tries to turn attunement into a discovery for your current action. Chance to succeed: 50% + (dynamic awareness / 50). Current: ${synchronicityChancePct}%. On success, you may get a note and discoveries can unlock new actions.\n\n${synchronicityCanOnlyUseLine}`
+          'Attune',
+          `Focuses on the hidden meaning contained within the object tied to your current action. Chance to succeed: 50% + (dynamic awareness / 50). Current: ${synchronicityChancePct}%. On success, you receive a note, and discoveries can unlock new actions, important information, hidden connections, and other secrets.\n\n${attuneCanOnlyUseLine}`
         )}
-        onActivate={() => EventBus.emit('ability-signal', { type: 'synchronicity' })}
-        icon={<IconSynchronicity />}
-        disabledByPhase={synchronicityPhaseLocked}
+        onActivate={() => EventBus.emit('ability-signal', { type: 'attune' })}
+        icon={<IconAttune />}
+        disabledByPhase={attunePhaseLocked || !attuneAvailable}
       />
     </div>
   )

@@ -10,6 +10,17 @@
 
 ---
 
+## Reading guide
+
+When this document references system mechanics, use this wording rule:
+
+- **Player-facing wording first** (what the player sees and feels)
+- **Developer wording second** (internal names and implementation terms)
+
+For exact implementation, use the linked system specs, which now follow the same structure.
+
+---
+
 ## 1. Game Overview
 
 ### Working Title
@@ -173,7 +184,7 @@ The player begins as a **Higher Self consciousness**. Abilities unlock as the av
 
 | Stage | Abilities |
 |-------|-----------|
-| Early | Dream Message, Intuition Pulse, Synchronicity Trigger |
+| Early | Dream Message, Intuition Pulse, Attune |
 | Mid | Clarity Burst, Probability Influence, Symbolic Vision |
 | Late | Reality Layer Vision, Time Perception Shift, Dimensional Navigation |
 
@@ -224,7 +235,7 @@ As consciousness rises, the boundary blurs:
 
 ## 5.2 Player Ability System
 
-See `PlayerAbilitySystem.md` for the current signal-based mechanics (directional pull, intuition pulse, synchronicity).
+See `PlayerAbilitySystem.md` for the current signal-based mechanics (directional pull, intuition pulse, attune).
 
 <!-- LEGACY (outdated): see PlayerAbilitySystem.md for updated mechanics.
 
@@ -234,7 +245,7 @@ Each ability exists in two forms — a Dream form (direct, used during dream lay
 
 | Ability | Dream Form | Waking Form | Unlocked At |
 |---------|-----------|-------------|-------------|
-| Perception Burst | See hidden objects, read NPC emotional state | Synchronicity Trigger — reveal hidden patterns | Level 0 (first dream) |
+| Perception Burst | See hidden objects, read NPC emotional state | Attune — reveal hidden patterns | Level 0 (first dream) |
 | Dream Message | Send a vision to sleeping NPCs | Plant a thought in the avatar's next sleep | Level 1 |
 | Intuition Pulse | Feel the right direction in any space | Nudge the avatar toward a specific action | Level 1 |
 | Clarity Burst | Clear confusion, reveal true nature of obstacles | Temporarily raise avatar's perception trait | Level 2 |
@@ -1966,7 +1977,7 @@ look_out_window
 **Player Influence:**
 - dream symbols
 - intuition pulse
-- synchronicity (light/sound)
+- attune (light/sound)
 
 ### Success Condition
 

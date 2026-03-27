@@ -2,6 +2,14 @@
 
 A 2D top-down consciousness RPG where an AI avatar responds to needs, player “signals”, and an entropy pressure system.
 
+## Documentation style
+
+Project docs are written in two layers:
+- **Player-Friendly View** first (plain-language gameplay meaning)
+- **Developer Notes** second (technical implementation details)
+
+If you are updating docs, keep that structure.
+
 ## Documentation (start here)
 
 - Project entry point: [`specs/README.md`](specs/README.md)

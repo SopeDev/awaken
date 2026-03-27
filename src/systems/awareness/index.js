@@ -7,5 +7,6 @@ export {
   MODE_BASE_AWARENESS_DELTAS,
   MODES_WITH_BASE_AWARENESS_DELTA,
   getBaseModeAwarenessDelta,
-  scaleModeDeltaByBaseline
+  scaleModeDeltaByBaseline,
+  UNCONSCIOUS_LOOP_BASE_AWARENESS_DELTA
 } from './modeDynamicAwareness.js'

@@ -1,98 +1,103 @@
 # Awareness System
 
-This spec reflects the current awareness implementation in code:
-- `src/systems/awareness/*`
-- `src/systems/character/characterEngine.js`
+## 1) What awareness means for the player
 
-## What “Awareness” is
+Awareness is the `0-100` HUD meter showing how clear or trapped the avatar feels.
 
-Awareness is a single `0–100` meter shown in the HUD.
+- higher awareness = clearer, more aligned choices
+- lower awareness = more automatic and stuck choices
 
-Internally, it is composed of:
-- `baselineAwareness` (`0–50`), derived from the current needs burden
-- `awarenessDynamicBuffer` (`0–baselineAwareness`), derived from LLM decision factors
-- a smoothed displayed value (`awareness`) that approaches the target using exponential smoothing
+### Dev Notes
+- Displayed value is `awareness`
+- Main code: `src/systems/awareness/*`, `src/systems/character/characterEngine.js`
 
-## Baseline awareness: derived from needs only
+## 2) Base awareness comes from life pressure
 
-Baseline awareness is computed by `computeBaselineAwarenessBreakdown(needs)` and uses:
-- a weighted burden ratio from the current needs
-- asymmetric weights where stress/loneliness/fatigue dominate:
-  - stress `1.25`
-  - loneliness `1.2`
-  - fatigue `1.15`
-  - hunger `0.95`
-  - thirst `0.95`
-  - boredom `0.75`
-  - dirtiness `0.55`
+Needs pressure sets the background state for awareness.  
+When needs are overloaded, clarity is harder to sustain.
 
-The resulting baseline is clamped to `0–50` where:
-- `0` means low burden
-- `50` means high burden
+This base shifts smoothly over time so the meter does not jitter.
 
-The displayed meter does not instantly jump when the needs-derived baseline changes.
-`characterEngine.syncBaselineAwarenessFromNeeds(deltaMs)` applies exponential smoothing using:
-- `BASELINE_AWARENESS_SMOOTH_TAU_MS = 180`
-- `t = 1 - exp(-deltaMs / BASELINE_AWARENESS_SMOOTH_TAU_MS)`
-- `_awarenessFinalSmoothed += (targetFinal - _awarenessFinalSmoothed) * t`
+### Dev Notes
+- Base value: `baselineAwareness` (`0-50`)
+- Built by `computeBaselineAwarenessBreakdown(needs)`
+- Key weights emphasize stress/loneliness/fatigue
+- Smoothed in `syncBaselineAwarenessFromNeeds(deltaMs)` with `BASELINE_AWARENESS_SMOOTH_TAU_MS = 180`
 
-## Dynamic awareness: derived from decision mode
+## 3) Completed actions push awareness up or down
 
-After an action completes, the engine applies the LLM’s `decision_factors.mode`.
+After each action finishes, awareness changes based on the action's orientation.
 
-Base deltas (`MODE_BASE_AWARENESS_DELTAS`) are:
-- `need_relief`: `+1`
-- `habit_relief`: `-2`
-- `avoidance`: `-4`
-- `stimulation_seeking`: `-1`
-- `exploration`: `+2`
-- `self_regulation`: `+2`
-- `unconscious_loop`: `-5`
-- `insight_following`: `+5`
+- grounded/constructive moves can raise awareness
+- avoidant/looping moves can reduce awareness
 
-The engine scales these by current baseline:
-- `scaledDelta = baseDelta * (baselineAwareness / 50)`
+If behavior is judged as a stuck repetition that is not helping, extra penalty applies.
 
-It then updates:
-- `awarenessDynamicBuffer = clamp(prev + scaledDelta, 0, baselineAwareness)`
-- displayed awareness is recomputed from baseline + buffer
+### Dev Notes
+- Orientation value: `decision_factors.mode`
+- Mode deltas (`MODE_BASE_AWARENESS_DELTAS`):
+  - `need_relief`: `+1`
+  - `comfort_seeking`: `-2`
+  - `avoidance`: `-4`
+  - `stimulation_seeking`: `-1`
+  - `exploration`: `+3`
+  - `self_regulation`: `+2`
+  - `insight_following`: `+5`
+- Stuck-loop add-on: `UNCONSCIOUS_LOOP_BASE_AWARENESS_DELTA = -4`
+- Combined delta is scaled by `baselineAwareness / 50`
 
-This dynamic buffer update happens on action completion (when the engine knows the LLM decision).
+## 4) Player influence affects awareness at decision time
 
-## Player-signal awareness: bump/penalty on decision
+When your abilities highlight options for the avatar, the game checks if your influence actually landed.
 
-The engine also applies a player-signal awareness bump/penalty at **decision time**.
+- landed influence: awareness bump
+- ignored influence: small penalty
+- landed influence + chosen option was highlighted: extra bump
 
-This happens only when:
-- an LLM decision was actually used, and
-- the chosen action overlaps any `salientActionIds` marked with `*` in the prompt.
+### Dev Notes
+- Applied only when highlighted choices were present and LLM decision was used
+- Signal flag: `decision.decision_factors.player_signal_used`
+- Constants:
+  - `PLAYER_SIGNAL_USED_AWARENESS_BONUS = 3`
+  - `PLAYER_SIGNAL_SALIENT_CHOICE_OVERLAP_BONUS = 2`
+  - `PLAYER_SIGNAL_IGNORED_AWARENESS_PENALTY = -2`
+- Delta scaled by `baselineAwareness / BASELINE_AWARENESS_MAX`
 
-Then it reads:
-- `decision.decision_factors.player_signal_used` (boolean)
+## 5) How stuck-loop is determined
 
-If `player_signal_used` is `true`:
-- `+ PLAYER_SIGNAL_USED_AWARENESS_BONUS` (scaled by baseline)
+A stuck loop is not a vibe check. It is derived from actual behavior patterns:
 
-If `player_signal_used` is `false`:
-- `PLAYER_SIGNAL_IGNORED_AWARENESS_PENALTY` (negative, scaled by baseline)
+- repetition is present
+- same action has recently failed the current primary need
+- unless it is valid direct bodily care for a bodily primary
 
-The meter is snapped (not gradually interpolated) to the decision-time target after this bump/penalty.
+### Dev Notes
+- Derived on server by `deriveUnconsciousLoop`
+- Uses recent actions, recent completion evaluations, chosen action, primary need, and `bodilyTargets`
+- Result is returned as `decision_factors.unconscious_loop`
 
-## Entrapment and clarity thresholds (UI flags)
+## 6) UI threshold flags
 
-The engine maintains two boolean flags for UI:
+The UI also labels two high-level states:
+
+- very low awareness (`entrapped`)
+- very high awareness (`clear`)
+
+### Dev Notes
 - `isEntrapped` when `awareness <= 20`
 - `isClear` when `awareness >= 80`
+- These are UI flags, not automatic level transition logic
 
-At the moment, these flags are primarily used for UI state (and prompt-related debugging/context), not for automatic consciousness level changes.
+## 7) Awareness vs consciousness level
 
-## Consciousness level vs awareness computation
+Consciousness level changes the decision framing.  
+Awareness tracks current state movement from needs and decisions.
 
-`consciousnessLevel` selects which LLM system prompt and decision context to use.
+They influence each other, but they are not the same value.
 
-However, the core awareness meter computation in the current code is driven by:
-- needs → baseline awareness
-- LLM decision factors → dynamic buffer
-
-It is not directly a function of `consciousnessLevel`.
+### Dev Notes
+- `consciousnessLevel` controls prompt/context selection
+- Awareness meter math is driven by:
+  - needs -> `baselineAwareness`
+  - decision mode + loop flag -> `awarenessDynamicBuffer`
 

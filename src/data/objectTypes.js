@@ -13,6 +13,7 @@
  * - which action targets the object (`actionId`, `action` metadata including `durationMs` from `ACTION_DURATION_MS`)
  * - action effects on needs (`needsEffects`) keyed by need keys
  * - synchronicity felt text (`synchronicityNote`, only when `hasHiddenDepth` is true)
+ * - `action.bodilyTargets`: bodily needs this action directly cares for (unconscious_loop exemption)
  *
  * Room-specific positioning remains in `src/data/roomData.js`.
  */
@@ -35,9 +36,11 @@ export const OBJECT_TYPES = {
   bed: {
     gridW: 3,
     gridH: 2,
+    interactionSide: 'top',
     actionId: 'go_to_sleep',
     action: {
       durationMs: ACTION_DURATION_MS.LONG,
+      bodilyTargets: ['fatigue'],
       label: 'go to sleep',
       loopReinforcing: false,
       repetitionRisk: 'medium',
@@ -50,10 +53,12 @@ export const OBJECT_TYPES = {
   phone: {
     gridW: 1,
     gridH: 1,
+    interactionSide: 'right',
     hasHiddenDepth: true,
     actionId: 'scroll_phone',
     action: {
       durationMs: ACTION_DURATION_MS.QUICK,
+      bodilyTargets: [],
       label: 'scroll my phone',
       loopReinforcing: true,
       repetitionRisk: 'high',
@@ -67,10 +72,12 @@ export const OBJECT_TYPES = {
   tv: {
     gridW: 1,
     gridH: 2,
+    interactionSide: 'right',
     hasHiddenDepth: true,
     actionId: 'watch_tv',
     action: {
       durationMs: ACTION_DURATION_MS.MEDIUM,
+      bodilyTargets: [],
       label: 'watch TV',
       loopReinforcing: true,
       repetitionRisk: 'high',
@@ -84,9 +91,11 @@ export const OBJECT_TYPES = {
   treadmill: {
     gridW: 2,
     gridH: 1,
+    interactionSide: 'left',
     actionId: 'use_treadmill',
     action: {
       durationMs: ACTION_DURATION_MS.LONG,
+      bodilyTargets: [],
       label: 'use the treadmill',
       loopReinforcing: false,
       repetitionRisk: 'medium',
@@ -106,10 +115,12 @@ export const OBJECT_TYPES = {
   computer: {
     gridW: 1,
     gridH: 2,
+    interactionSide: 'left',
     hasHiddenDepth: true,
     actionId: 'browse_internet',
     action: {
       durationMs: ACTION_DURATION_MS.MEDIUM,
+      bodilyTargets: [],
       label: 'browse the internet',
       loopReinforcing: true,
       repetitionRisk: 'medium',
@@ -124,10 +135,12 @@ export const OBJECT_TYPES = {
   books: {
     gridW: 2,
     gridH: 1,
+    interactionSide: 'top',
     hasHiddenDepth: true,
     actionId: 'read_book',
     action: {
       durationMs: ACTION_DURATION_MS.MEDIUM,
+      bodilyTargets: [],
       label: 'read a book',
       loopReinforcing: false,
       repetitionRisk: 'low',
@@ -136,15 +149,17 @@ export const OBJECT_TYPES = {
     },
     needsEffects: { boredom: -14, stress: -12, fatigue: 4 },
     intuitionFocusPhrase: 'book',
-    synchronicityNote: '*A line in the book lands differently than expected*'
+    synchronicityNote: 'A passage about birds lands differently. I glance toward the window.'
   },
   window: {
     gridW: 2,
     gridH: 1,
+    interactionSide: 'bottom',
     hasHiddenDepth: true,
     actionId: 'look_out_window',
     action: {
       durationMs: ACTION_DURATION_MS.MICRO,
+      bodilyTargets: [],
       label: 'look out the window',
       insightCapable: true,
       loopReinforcing: false,
@@ -154,14 +169,16 @@ export const OBJECT_TYPES = {
     },
     needsEffects: { boredom: -6, stress: -6, loneliness: -8 },
     intuitionFocusPhrase: 'window',
-    synchronicityNote: '*Something outside shifts — I am not sure what*'
+    synchronicityNote: 'A bird lands on the sill. Something about it feels important.'
   },
   door: {
     gridW: 1,
     gridH: 1,
+    interactionSide: 'top',
     actionId: 'go_outside',
     action: {
       durationMs: ACTION_DURATION_MS.MICRO,
+      bodilyTargets: [],
       label: 'go outside',
       loopReinforcing: false,
       repetitionRisk: 'low',
@@ -172,9 +189,11 @@ export const OBJECT_TYPES = {
   refrigerator: {
     gridW: 1,
     gridH: 1,
+    interactionSide: 'right',
     actionId: 'eat_snack',
     action: {
       durationMs: ACTION_DURATION_MS.QUICK,
+      bodilyTargets: ['hunger'],
       label: 'get a snack',
       loopReinforcing: false,
       repetitionRisk: 'low',
@@ -186,10 +205,12 @@ export const OBJECT_TYPES = {
   couch: {
     gridW: 1,
     gridH: 2,
+    interactionSide: 'left',
     hasHiddenDepth: true,
     actionId: 'sit_on_couch',
     action: {
       durationMs: ACTION_DURATION_MS.QUICK,
+      bodilyTargets: [],
       label: 'sit on the couch',
       loopReinforcing: false,
       repetitionRisk: 'low',
@@ -203,9 +224,11 @@ export const OBJECT_TYPES = {
   water_dispenser: {
     gridW: 1,
     gridH: 1,
+    interactionSide: 'right',
     actionId: 'drink_water',
     action: {
       durationMs: ACTION_DURATION_MS.MICRO,
+      bodilyTargets: ['thirst'],
       label: 'get some water',
       loopReinforcing: false,
       repetitionRisk: 'low',
@@ -217,9 +240,11 @@ export const OBJECT_TYPES = {
   shower: {
     gridW: 2,
     gridH: 1,
+    interactionSide: 'bottom',
     actionId: 'take_shower',
     action: {
       durationMs: ACTION_DURATION_MS.MEDIUM,
+      bodilyTargets: ['dirtiness'],
       label: 'take a shower',
       loopReinforcing: false,
       repetitionRisk: 'low',
@@ -273,5 +298,18 @@ export const SYNCHRONICITY_NOTE_BY_ACTION_ID = Object.freeze(
           type?.hasHiddenDepth === true
       )
       .map(([, type]) => [type.actionId, type.synchronicityNote])
+  )
+)
+
+export const BODILY_TARGETS_BY_ACTION_ID = Object.freeze(
+  Object.fromEntries(
+    Object.entries(OBJECT_TYPES)
+      .filter(([, type]) => type?.actionId)
+      .map(([, type]) => [
+        type.actionId,
+        Object.freeze(
+          Array.isArray(type.action?.bodilyTargets) ? [...type.action.bodilyTargets] : []
+        )
+      ])
   )
 )

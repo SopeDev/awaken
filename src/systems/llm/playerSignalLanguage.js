@@ -8,6 +8,7 @@ const KNOWN = {
   wasd_east: 'something nudges me toward the right — like a lean I did not choose',
   wasd_west: 'something nudges me left — a sideways pull at the edge of attention',
   intuition_pulse: 'a quick inner ping attaches to one thing nearby — my attention snags and will not quite let go',
+  attune: 'the room seems to rhyme with itself — coincidence feels too neat, and it sticks with me',
   synchronicity: 'the room seems to rhyme with itself — coincidence feels too neat, and it sticks with me',
   dream_carryover: 'an image from sleep is still smeared across waking — a fragment I cannot fully shake',
   emotional_resonance: 'a wave of feeling rises without a clear cause — it colors everything for a moment',

@@ -1,130 +1,100 @@
 # Avatar Needs System
 
-This spec reflects the current needs model implemented in:
-- `src/systems/needs/needsState.js`
-- `src/systems/needs/constants.js`
+## 1) What the needs system means in play
 
-and the current LLM-facing conversion implemented in:
-- `src/systems/llm/needsLanguage.js`
+The avatar is always dealing with pressure from daily needs.  
+Those pressures shape what feels appealing, urgent, or avoidant in each moment.
 
-## Core model
+- All needs run from `0` to `100`
+- `0` means handled
+- `100` means critical
 
-All needs are scored on a unified `0–100` scale:
-- `0` = satisfied
-- `100` = critical
+Current needs:
+- hunger
+- thirst
+- fatigue
+- dirtiness
+- boredom
+- stress
+- loneliness
 
-Current need keys (`NEED_KEYS`):
-- `hunger`
-- `thirst`
-- `fatigue`
-- `dirtiness`
-- `boredom`
-- `stress`
-- `loneliness`
+### Dev Notes
+- Source files: `src/systems/needs/needsState.js`, `src/systems/needs/constants.js`
+- Initial values come from `INITIAL_NEEDS`
 
-Initial needs (`INITIAL_NEEDS`) define the starting values.
+## 2) How needs rise over time
 
-## Tick update (game-time minutes)
+As in-game time passes, needs naturally increase.  
+This keeps the avatar from staying in a static state and creates real tradeoffs.
 
-Needs are advanced by calling `needsState.tick(gameMinutes, ...)`.
+Base drift per in-game minute:
+- hunger `+3.0`
+- thirst `+4.0`
+- fatigue `+2.0`
+- dirtiness `+1.0`
+- boredom `+2.0`
+- stress `+1.0`
+- loneliness `+3.0`
 
-Each tick applies three steps:
+Then needs also influence each other. Example: strong thirst can increase fatigue, and high fatigue can feed stress.
 
-1. **Base drift**: adds `BASE_DRIFT[key] * deltaMinutes` for each need key.
-   Base drift coefficients (per in-game minute):
-   - hunger `+3.0`
-   - thirst `+4.0`
-   - fatigue `+2.0`
-   - dirtiness `+1.0`
-   - boredom `+2.0`
-   - stress `+1.0`
-   - loneliness `+3.0`
-2. **Cross-influences** (stable coefficients):
-   The cross-influences are implemented as:
-   - `hunger`:
-     - increases `stress` only when `hunger > 60` (coefficient `0.04`)
-     - increases `boredom` continuously (`+ hunger * 0.02`)
-   - `thirst`:
-     - increases `fatigue` continuously (`+ thirst * 0.04`)
-     - increases `stress` only when `thirst > 60` (coefficient `0.05`)
-   - `fatigue`:
-     - increases `stress` only when `fatigue > 60` (coefficient `0.05`)
-     - increases `boredom` continuously (`+ fatigue * 0.05`)
-   - `boredom`:
-     - increases `stress` only when `boredom > 75` (coefficient `0.02`)
-   - `stress`:
-     - increases `fatigue` continuously (`+ stress * 0.03`)
-   - `loneliness`:
-     - increases `stress` only when `loneliness > 50` (coefficient `0.04`)
-     - increases `boredom` continuously (`+ loneliness * 0.03`)
-   - `dirtiness`:
-     - increases `stress` only when `dirtiness > 80` (coefficient `0.02`)
-3. **Clamp**: each need is clamped to `[0, 100]`.
+### Dev Notes
+- Update entrypoint: `needsState.tick(gameMinutes, ...)`
+- Tick order: base drift -> cross-influences -> clamp to `[0, 100]`
+- Cross-influences use fixed coefficients and threshold checks in `needsState.js`
 
-## Action effects (pending deltas + linear application)
+## 3) How actions change needs
 
-Each action has an `ACTION_EFFECTS[actionId]` map of per-need deltas.
+Each action has need effects.  
+Some effects help immediately, others have costs.
 
-When an action starts:
-- the engine reads `ACTION_EFFECTS[actionId]`
-- applies habituation rules (per action meta fields) to produce effective deltas
-- stores them into `pendingNeedDeltas` and `pendingNeedTotalDeltas`
-- sets `pendingNeedChangeTotalMs = durationMs`
+Example of intended feel:
+- `drink_water` strongly helps thirst
+- `scroll_phone` can ease boredom but may increase other pressure over time
 
-While the action is progressing:
-- `applyPendingNeedDeltas(deltaMs)` applies pending deltas **linearly over the action duration**.
+Effects are applied gradually while the action is happening, not all at once.
 
-## Habituation Rules (action meta → reduced need effects)
+For direct bodily-care actions (hunger, thirst, fatigue, dirtiness), the action ends early as soon as that bodily need is fully satisfied (`0`).
 
-Some actions “habituate” over repeated use: the same action becomes less effective at moving specific needs.
+### Dev Notes
+- Effects map: `ACTION_EFFECTS[actionId]`
+- On action start, engine prepares pending deltas
+- During action, deltas are applied linearly via `applyPendingNeedDeltas(deltaMs)`
+- Action duration controls pacing of this linear application
+- If the active action has a bodily target and that target reaches `0`, the interaction is finished immediately
 
-For each action, `characterEngine.onActionStarted()` reads two optional meta fields from `ACTIONS[actionId]`:
+## 4) Habituation (repeating the same fix works less)
 
-- `habituationRate` (number)
-- `habituationNeeds` (array of need keys)
+If the avatar repeats the same action too often for the same need, that action can lose impact.  
+This prevents one cheap behavior from solving everything forever.
 
-Habituation is applied per need key while building `pendingNeedDeltas`:
+Sleep partially restores sensitivity, so repeated patterns can cool down over time.
 
-1. A need key `k` is eligible for habituation only when:
-   - `habituationRate < 1.0`
-   - and `habituationNeeds` includes `k`
-2. A per-(action, need) counter is used:
-   - `counterKey = actionId + ':' + needKey`
-   - `useCount = habituationCounters[counterKey] || 0`
-3. The action delta is scaled:
-   - `effectiveDelta = baseDelta * (habituationRate ^ useCount)`
-4. If the need is not eligible (or `habituationRate >= 1.0`), then:
-   - `effectiveDelta = baseDelta` (no reduction)
+### Dev Notes
+- Action metadata keys: `habituationRate`, `habituationNeeds`
+- Counter key shape: `actionId:needKey`
+- Effective delta: `baseDelta * (habituationRate ^ useCount)` when eligible
+- Counters increment on action completion
+- `go_to_sleep` reduces counters with `floor(current * 0.70)`
 
-Counters advance only when the action actually completes:
+## 5) Attune interaction with needs
 
-- for every `counterKey` that was used during `onActionStarted()`, increment `habituationCounters[counterKey] += 1`
+When Attune successfully interrupts an action, only the helpful part is kept.  
+Relief is applied, but negative side effects are not carried through in that interrupt path.
 
-Sleep partially recovers habituation sensitivity:
+### Dev Notes
+- On Attune success, engine flushes only negative pending deltas
+- Positive pending deltas are discarded in this path
 
-- when `actionId === 'go_to_sleep'`, every habituation counter is reduced:
-  - `next = floor(current * 0.70)`
+## 6) What the decision model receives
 
-## Synchronicity interrupt: relief-only flush
+The decision model does not see raw need numbers directly.  
+It receives natural language descriptions like "pretty thirsty" or "very stressed".
 
-Successful synchronicity ends the interaction early.
+At consciousness level `0`, only stronger needs (r2 and above) are described.
 
-The engine flushes only **negative** pending deltas (relief effects) immediately, and discards the rest:
-- negative totals reduce the relevant need(s) toward satisfaction
-- positive totals are dropped (no “make the need worse” during synchronicity success)
-
-## LLM interface: how needs become prompt text
-
-The LLM does not receive raw numeric need values.
-
-Server-side, `buildNeedsDescription()` converts each need into a natural-language phrase:
-- For each need, values are bucketed into bands based on the numeric value:
-  - `<20`: omitted
-  - `20–39`: `a little <adjective>`
-  - `40–59`: `'<adjective>'`
-  - `60–79`: `pretty <adjective>`
-  - `>=80`: `very <adjective>`
-- If all needs are omitted, the description becomes `fine`.
-
-The prompt then uses this prose plus trait descriptions to decide the next action.
+### Dev Notes
+- Conversion logic: `src/systems/llm/needsLanguage.js`
+- Builder: `buildNeedsDescription()`
+- Band filtering uses `minBand = 'r2'` at level 0, `r1` otherwise
 

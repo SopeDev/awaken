@@ -47,7 +47,18 @@ You can choose between habit and a truer move, and name what you are testing in 
 
 const ALLOWED_PRIMARY_SECONDARY = `["hunger","thirst","fatigue","dirtiness","boredom","stress","loneliness","curiosity","comfort","habit","player_signal","insight","avoidance","none"]`
 
-const ALLOWED_MODES = `["need_relief","comfort_seeking","avoidance","stimulation_seeking","exploration","self_regulation","insight_following"]`
+/** Single source of truth for `decision_factors.mode` (system prompt + server normalization). */
+export const DECISION_FACTOR_MODES = Object.freeze([
+  'need_relief',
+  'comfort_seeking',
+  'avoidance',
+  'stimulation_seeking',
+  'exploration',
+  'self_regulation',
+  'insight_following'
+])
+
+const ALLOWED_MODES = JSON.stringify([...DECISION_FACTOR_MODES])
 
 /** Same rule block after the JSON shape for levels 0–4. */
 const SHARED_RULES_AFTER_SHAPE = `Rules for "thought":
@@ -112,7 +123,9 @@ Rules for "player_signal_used":
 
 Rules for "repetition_acknowledged":
 - True only if the recent context clearly shows repeating or circling back into something familiar.
-- Otherwise false.`
+- Otherwise false.
+
+Do not output "unconscious_loop" (or any field not shown in the JSON shape). The server derives unconscious_loop from repetition, matching recent outcomes, and bodily-care rules after your response.`
 
 const OPTIONAL_FIELD_RULES = [
   '',

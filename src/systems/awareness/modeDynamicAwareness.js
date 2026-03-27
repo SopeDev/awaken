@@ -2,16 +2,15 @@ import { BASELINE_AWARENESS_MAX } from './baselineAwareness.js'
 
 /**
  * Base awareness deltas for `decision_factors.mode` (before scaling by baseline / 50).
- * `signal_response` and any other API modes are omitted — no delta until explicitly tuned.
+ * Keys match `DECISION_FACTOR_MODES` in `systemPrompts.js`.
  */
 export const MODE_BASE_AWARENESS_DELTAS = Object.freeze({
   need_relief: 1,
-  habit_relief: -2,
+  comfort_seeking: -2,
   avoidance: -4,
   stimulation_seeking: -1,
-  exploration: 2,
+  exploration: 3,
   self_regulation: 2,
-  unconscious_loop: -5,
   insight_following: 5
 })
 
@@ -32,3 +31,6 @@ export function scaleModeDeltaByBaseline(baseDelta, baselineAwareness) {
   const baselineScale = b / BASELINE_AWARENESS_MAX
   return baseDelta * baselineScale
 }
+
+/** Combined with mode delta when `decision_factors.unconscious_loop` is true (server-derived). */
+export const UNCONSCIOUS_LOOP_BASE_AWARENESS_DELTA = -4

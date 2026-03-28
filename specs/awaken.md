@@ -3,7 +3,7 @@
 
 | Field | Value |
 |-------|-------|
-| Version | 0.4 |
+| Version | 0.4.1-staging |
 | Status | Living Document |
 | Author | Jorge Carlos Quevedo |
 | Purpose | Single source of truth for game vision, systems, mechanics, and world. |

@@ -17,6 +17,8 @@ Before implementing a substantial new feature:
 - Update PROJECT_PROGRESS.md with completed work and the next planned slice.
 - When a change alters system behavior, update the matching spec in `specs/`.
 - Do not stage, commit, or push Git changes. The user always handles Git staging, commits, and pushes.
+  Exception: in cloud sessions (ephemeral containers), commit and push only to the assigned branch,
+  never to `main`.
 - Target desktop browsers with keyboard input (WASD / Space / E). Don't design for mobile or touch
   unless the user asks.
 

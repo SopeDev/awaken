@@ -25,6 +25,24 @@ reconstructed from the code and specs on 2026-10-14, not recorded at the time th
 - **Awareness and consciousness level are separate values.** Awareness is the moment-to-moment meter;
   consciousness level selects the prompt framing and the stage of the game (§7.1).
 
+## Reboot direction (2026-10-16)
+
+The March build had deep systems, but players couldn't see what their actions did. The next step is a
+small fresh prototype focused on one feeling: the avatar realizes something because the player
+guided them there. Existing systems (Cosmic Blueprint, needs, entropy) are shelved, not deleted.
+
+- **First goal: get the avatar to go outside.** The prototype is one room, about 10 minutes long, and
+  ends with the door opening.
+- **Prototype character: burnout.** Hand-authored, flat, running on autopilot. Later, characters come
+  from archetype presets or a custom birth chart via the Cosmic Blueprint, and each one is stuck for
+  a different reason.
+- **Setting:** a cozy, Stardew-style pixel town set in the present day (phones, TV, wifi).
+- **The player sees the layer of meaning; the avatar doesn't.** Meaningful objects glow for the player,
+  so the goal is always readable.
+- **Every signal gets a visible reaction**, including being ignored.
+- **"Connection" replaces "awareness"**: it's the bandwidth between the player and the avatar.
+- **Color as consciousness:** the room is washed out and the outside is fully saturated.
+
 ## Process
 
 - **Code beats specs.** When they disagree, the code is the source of truth and the spec gets
